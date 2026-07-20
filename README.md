@@ -27,9 +27,19 @@ from a Vulkan layer (`VK_LAYER_bladestats_overlay`). A Vulkan layer is code runn
 game process. That is a real difference from the Windows side, and it is stated here rather
 than glossed over.
 
-**Overhead is the headline metric.** An overlay that costs frames defeats its own purpose. The
-target is under 1% of one core and under 30 MB resident, and it is checked by measurement, not
-assumed.
+**Overhead is the headline metric.** An overlay that costs frames defeats its own purpose, so
+it is measured rather than assumed. On an idle desktop, release build:
+
+| | Measured | Goal |
+|---|---|---|
+| CPU | 0.05% of one core | under 1% |
+| Private memory | 36 MB | under 30 MB — **not met** |
+| Binary | 1.2 MB | — |
+
+The memory goal is currently missed. Most of the footprint is the graphics stack the overlay
+has to load in order to draw at all — D3D11, DXGI and the display driver account for the bulk
+of the 61 modules in the process. Whether that can be brought down without giving up
+GPU-composited rendering is an open question, not a solved one.
 
 ## What it shows
 

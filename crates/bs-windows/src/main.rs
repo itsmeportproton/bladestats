@@ -52,6 +52,9 @@ fn main() -> Result<()> {
     let hub = SnapshotHub::new();
     if demo {
         hub.store(demo_snapshot());
+    } else {
+        // Sampling runs on its own thread so a slow PDH query can never stall a redraw.
+        bs_telemetry::spawn(hub.clone());
     }
 
     // The layout drives the window size, not the other way round: the HUD knows how much room

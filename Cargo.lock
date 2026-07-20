@@ -79,6 +79,7 @@ dependencies = [
  "bs-core",
  "nvml-wrapper",
  "tracing",
+ "windows",
 ]
 
 [[package]]
