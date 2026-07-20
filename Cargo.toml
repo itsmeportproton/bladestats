@@ -4,8 +4,9 @@ members = [
     "crates/bs-core",
     "crates/bs-render",
     "crates/bs-telemetry",
+    "crates/bs-windows",
 ]
-# bs-windows и bs-linux-layer добавляются в members на своих этапах.
+# bs-linux-layer добавляется в members на своём этапе.
 
 [workspace.package]
 version = "0.1.0"
