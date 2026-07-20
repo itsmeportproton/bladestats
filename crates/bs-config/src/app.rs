@@ -15,7 +15,7 @@ use egui::{
 };
 
 use crate::anim::Opening;
-use crate::monitor;
+use crate::counter::Counter;
 use crate::theme::{self, Accents};
 
 /// The window at rest.
@@ -50,16 +50,19 @@ pub struct ConfigApp {
     pending_save: Option<Instant>,
     saved_at: Option<Instant>,
     save_error: Option<String>,
-    monitor_open: bool,
+
+    /// The counter process this window started, and can stop.
+    counter: Counter,
 }
 
 impl ConfigApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        counter: Counter,
+        path: PathBuf,
+        config: Config,
+    ) -> Self {
         install_font(&cc.egui_ctx);
-
-        let path = bs_core::config::default_path();
-        let (config, outcome) = Config::load(&path);
-        tracing::info!(path = %path.display(), ?outcome, "settings");
 
         // One reading, purely to find out what hardware is here. The window colours itself
         // from the answer.
@@ -88,14 +91,15 @@ impl ConfigApp {
             pending_save: None,
             saved_at: None,
             save_error: None,
-            // `--monitor` opens the preview straight away. Useful while working on the
-            // preview itself, since reaching the button first means the window has to be
-            // clicked, which is awkward to automate.
-            monitor_open: std::env::args().any(|a| a == "--monitor"),
+            counter,
         }
     }
 
     /// Records that something changed, so it gets written shortly.
+    ///
+    /// The counter reads the file, so the write is what carries the change across. It is
+    /// delayed rather than immediate because dragging a slider changes a value dozens of
+    /// times a second.
     fn touch(&mut self) {
         self.pending_save = Some(Instant::now());
         self.saved_at = None;
@@ -133,7 +137,15 @@ impl eframe::App for ConfigApp {
         let ctx = ui.ctx().clone();
         self.save_if_due();
 
-        // Repaint only while something is moving. An idle configurator should cost nothing.
+        // The "saved" notice has to be forgotten once it has been up long enough, not merely
+        // stop being drawn. Leaving it set kept the condition below true forever, which held
+        // the window repainting at full rate for the rest of the session &mdash; four percent
+        // of a core spent redrawing an unchanged window.
+        if self.saved_at.is_some_and(|at| at.elapsed() >= SAVED_NOTICE) {
+            self.saved_at = None;
+        }
+
+        // Repaint only while something is moving. An idle window should cost nothing.
         if !self.opening.finished() || self.pending_save.is_some() || self.saved_at.is_some() {
             ctx.request_repaint();
         }
@@ -158,19 +170,6 @@ impl eframe::App for ConfigApp {
             content.set_opacity(opacity);
             content.set_clip_rect(rect);
             self.contents(&mut content, rect);
-        }
-
-        if self.monitor_open {
-            let mut open = true;
-            monitor::show(
-                &ctx,
-                &self.config,
-                &self.accents,
-                &self.gpu_name,
-                self.gpu_vendor,
-                &mut open,
-            );
-            self.monitor_open = open;
         }
     }
 }
@@ -545,56 +544,76 @@ impl ConfigApp {
         let y = rect.center().y + 2.0;
         let mono = FontId::new(11.0, FontFamily::Monospace);
 
-        // What the settings file is doing right now. Somebody who just clicked something wants
-        // to know it landed.
-        let (dot, text, colour) = match (&self.save_error, self.pending_save, self.saved_at) {
-            (Some(e), _, _) => (theme::BAD, format!("not saved: {e}"), theme::BAD),
-            (None, Some(_), _) => (theme::WARN, "Saving...".into(), theme::MUTED),
-            (None, None, Some(at)) if at.elapsed() < SAVED_NOTICE => {
-                (theme::GOOD, "Saved".into(), theme::MUTED)
-            }
-            _ => (theme::GOOD, "Settings applied live".into(), theme::FAINT),
+        // Left: whether the counter is up. Checked each frame rather than remembered, so one
+        // that has died is reported instead of assumed to be fine.
+        let running = self.counter.running();
+        let (dot, state, colour) = match (running, self.counter.error()) {
+            (true, _) => (theme::GOOD, "Counter running".to_string(), theme::MUTED),
+            (false, Some(e)) => (theme::BAD, format!("counter failed: {e}"), theme::BAD),
+            (false, None) => (theme::WARN, "Counter stopped".into(), theme::MUTED),
         };
         p.circle_filled(Pos2::new(rect.left() + PAD + 3.0, y - 1.0), 3.0, dot);
         p.text(
             Pos2::new(rect.left() + PAD + 14.0, y),
             Align2::LEFT_CENTER,
+            state,
+            mono.clone(),
+            colour,
+        );
+
+        // Right: whether the last change reached disk. Somebody who just clicked something
+        // wants to know it landed.
+        let (text, colour) = match (&self.save_error, self.pending_save, self.saved_at) {
+            (Some(e), _, _) => (format!("not saved: {e}"), theme::BAD),
+            (None, Some(_), _) => ("saving...".into(), theme::FAINT),
+            (None, None, Some(at)) if at.elapsed() < SAVED_NOTICE => {
+                ("saved".to_string(), theme::MUTED)
+            }
+            // Nothing pending, so the space says the one thing about this window that is not
+            // obvious: closing it does not take the counter with it.
+            _ => ("close: counter keeps running".into(), theme::FAINT),
+        };
+        p.text(
+            Pos2::new(rect.right() - PAD, y),
+            Align2::RIGHT_CENTER,
             text,
             mono,
             colour,
         );
 
-        let button = Rect::from_min_max(
-            Pos2::new(rect.right() - PAD - 120.0, rect.top() + 11.0),
-            Pos2::new(rect.right() - PAD, rect.top() + 35.0),
+        // Stopping the counter needs somewhere to live, and it is not the red light: that
+        // closes this window, which is the common action and must not kill the counter.
+        let stop = Rect::from_min_max(
+            Pos2::new(rect.right() - PAD - 240.0, rect.top() + 12.0),
+            Pos2::new(rect.right() - PAD - 150.0, rect.top() + 34.0),
         );
-        let response = ui.interact(button, ui.id().with("monitor"), Sense::click());
-        let tint = self.accents.chrome;
-        let fill = theme::dim(tint.fill, if response.hovered() { 0.24 } else { 0.12 });
-        let p = ui.painter();
-        p.rect_filled(button, CornerRadius::same(7), fill);
-        p.rect_stroke(
-            button,
-            CornerRadius::same(7),
-            Stroke::new(1.0, theme::dim(tint.fill, 0.45)),
-            StrokeKind::Inside,
-        );
-        p.text(
-            button.center(),
-            Align2::CENTER_CENTER,
-            if self.monitor_open {
-                "Close monitor"
+        if running {
+            let response = ui.interact(stop, ui.id().with("stop"), Sense::click());
+            let p = ui.painter();
+            let tint = if response.hovered() {
+                theme::BAD
             } else {
-                "Open monitor"
-            },
-            FontId::new(11.0, FontFamily::Monospace),
-            tint.ink,
-        );
-        if response.clicked() {
-            self.monitor_open = !self.monitor_open;
-        }
-        if response.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                theme::FAINT
+            };
+            p.rect_stroke(
+                stop,
+                CornerRadius::same(6),
+                Stroke::new(1.0, theme::dim(tint, 0.5)),
+                StrokeKind::Inside,
+            );
+            p.text(
+                stop.center(),
+                Align2::CENTER_CENTER,
+                "stop counter",
+                FontId::new(10.0, FontFamily::Monospace),
+                tint,
+            );
+            if response.clicked() {
+                self.counter.stop();
+            }
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
         }
     }
 }

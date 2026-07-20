@@ -189,8 +189,11 @@ name = "bs-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bs-core",
+ "bs-render",
  "bs-telemetry",
+ "bs-windows",
  "eframe",
  "egui",
  "tracing",
@@ -232,12 +235,13 @@ name = "bs-windows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bs-core",
  "bs-render",
  "bs-telemetry",
  "ferrisetw",
+ "toml",
  "tracing",
- "tracing-subscriber",
  "windows 0.62.2",
 ]
 

@@ -9,9 +9,9 @@ pub mod atlas;
 pub mod draw;
 pub mod hud;
 
-pub use atlas::{AtlasError, Glyph, GlyphAtlas, default_charset};
+pub use atlas::{Atlas, AtlasError, Face, Glyph, GlyphAtlas, TextStyle, default_charset};
 pub use draw::{DrawList, Vertex};
-pub use hud::{HudOptions, HudSize};
+pub use hud::{HudModel, HudOptions, HudSize, HudStyle};
 
 /// The overlay font, embedded in the binary.
 ///

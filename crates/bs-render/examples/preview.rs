@@ -15,7 +15,11 @@ const FONT_PX: f32 = 16.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let atlas = GlyphAtlas::new(bs_render::EMBEDDED_FONT, FONT_PX)?;
-    let config = Config::default();
+    let mut config = Config::default();
+    // The preview exists to be compared against the design, and the design shows everything.
+    config.metrics.low_01pct = true;
+    config.metrics.cpu_temp = true;
+    config.experimental.graphics_api = true;
     let opts = HudOptions::default();
 
     // Two states side by side: an empty snapshot (how the overlay looks before the first
@@ -106,35 +110,40 @@ fn rasterize(list: &DrawList, atlas: &GlyphAtlas, w: usize, h: usize) -> Vec<u8>
 
 fn populated() -> MetricsSnapshot {
     let mut s = MetricsSnapshot::default();
-    s.cpu.name = Some("AMD Ryzen 7 7800X3D 8-Core Processor".into());
+    // The machine from the design, so the preview and the mockup can be held side by side.
+    s.cpu.name = Some("Ryzen 7 9700X".into());
     s.cpu.load_pct = Some(42.0);
-    s.cpu.power = Some(Power::Estimated(65.0));
+    s.cpu.power = Some(Power::Estimated(78.0));
     s.cpu.cores = (0..16)
         .map(|i| CoreMetrics {
             load_pct: [12.0, 88.0, 34.0, 95.0][i % 4],
-            freq_mhz: Some(4200.0 + i as f32 * 40.0),
+            freq_mhz: Some(5210.0 - i as f32 * 40.0),
         })
         .collect();
     s.gpu = GpuMetrics {
-        name: Some("NVIDIA GeForce RTX 4070".into()),
-        vendor: Vendor::Nvidia,
-        load_pct: Some(88.0),
-        vram_used_bytes: Some(6_500_000_000),
-        vram_total_bytes: Some(12_884_901_888),
-        temp_c: Some(62.0),
-        core_clock_mhz: Some(2610.0),
-        power: Some(Power::Measured(145.0)),
+        name: Some("Radeon RX 7800 XT".into()),
+        vendor: Vendor::Amd,
+        load_pct: Some(97.0),
+        vram_used_bytes: Some(12_025_908_838),
+        vram_total_bytes: Some(17_179_869_184),
+        temp_c: Some(68.0),
+        core_clock_mhz: Some(2430.0),
+        power: Some(Power::Measured(231.0)),
     };
-    s.memory.used_bytes = Some(19_000_000_000);
+    s.memory.used_bytes = Some(19_756_101_632);
     s.memory.total_bytes = Some(34_359_738_368);
-    s.memory.speed_mhz = Some(6000);
+    s.memory.speed_mhz = Some(2576);
+    s.memory.kind = Some("DDR5");
+    s.memory.rated_mhz = Some(5800);
+    s.memory.modules = vec![16384, 16384];
+    s.graphics_api = Some("D3D12");
     s.frames = Some(FrameMetrics {
-        fps: 144.0,
-        frametime_ms: 6.9,
+        fps: 142.0,
+        frametime_ms: 7.0,
         avg_fps: 141.0,
-        low_1pct: Some(98.0),
-        low_01pct: Some(72.0),
-        sample_count: 2000,
+        low_1pct: Some(118.0),
+        low_01pct: Some(96.0),
+        sample_count: 5000,
     });
     s
 }

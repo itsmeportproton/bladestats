@@ -16,6 +16,9 @@ pub struct MetricsSnapshot {
     /// `None` while there is no frame source: on Windows without administrator rights, for
     /// instance, or when the focused window is not a game.
     pub frames: Option<FrameMetrics>,
+    /// Which graphics API the target renders with: `D3D12`, `Vulkan`. Inferred rather than
+    /// reported, so it stays `None` whenever the guess would be a guess.
+    pub graphics_api: Option<&'static str>,
     /// Why something the user expected to see is missing.
     ///
     /// A dash says a value could not be read but not why, and "the frame rate is blank" is
@@ -89,6 +92,15 @@ pub struct MemoryMetrics {
     pub total_bytes: Option<u64>,
     /// The configured speed, not the maximum from SPD. Read once at startup.
     pub speed_mhz: Option<u32>,
+    /// Generation, as firmware names it: `DDR5`, `LPDDR5`.
+    pub kind: Option<&'static str>,
+    /// What the modules are rated for, which is not what they necessarily run at — a kit
+    /// rated 6000 sits at 4800 until its profile is switched on, and the difference is
+    /// exactly what a user with a new machine wants to see.
+    pub rated_mhz: Option<u32>,
+    /// Capacity of each installed module in megabytes, in slot order. Empty when firmware
+    /// would not say.
+    pub modules: Vec<u32>,
     // There is no power field here and there will not be one: consumer platforms expose no
     // power sensor for memory, not in SPD, not in SMBIOS, not in hwmon.
 }

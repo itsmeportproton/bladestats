@@ -85,6 +85,10 @@ pub struct Theme {
     pub text: Color,
     /// Metric labels — dimmer than the values.
     pub label: Color,
+    /// Block headings and other structural text. Dimmer again than a label: these words name
+    /// a section rather than a reading, and at full weight they would compete with the
+    /// numbers they introduce.
+    pub faint: Color,
     /// The backing panel. Fully transparent means "no background".
     pub background: Color,
     /// Good / warning / bad scale, used for load and temperature.
@@ -100,7 +104,10 @@ impl Default for Theme {
         Self {
             text: Color::rgb(0xF0, 0xF0, 0xF0),
             label: Color::rgb(0xA0, 0xA0, 0xA0),
-            background: Color::rgba(0x00, 0x00, 0x00, 0x99),
+            faint: Color::rgb(0x6A, 0x6F, 0x78),
+            // Not pure black: a panel that is very slightly blue reads as a surface laid over
+            // the game rather than as a hole cut in it. The alpha stays the user's to choose.
+            background: Color::rgba(0x08, 0x09, 0x0B, 0x99),
             good: Color::rgb(0x6F, 0xCF, 0x50),
             warn: Color::rgb(0xE8, 0xB3, 0x39),
             bad: Color::rgb(0xE0, 0x50, 0x40),

@@ -1,14 +1,13 @@
-//! The bladestats configurator.
+//! bladestats: the settings window, and the program that ties it to the counter.
 //!
-//! A separate program from the overlay, launched when wanted and closed again. It edits the
-//! settings file; the overlay watches that file and applies changes about a second later.
-//! Nothing else passes between them, which is why the overlay stays as small as it is: none of
-//! this window's weight is loaded while a game is running.
+//! One executable. Starting it puts the overlay on screen and opens this window; the overlay
+//! runs on its own thread and reads the same settings this window edits, so a click reaches
+//! the counter at once.
 
 pub mod anim;
 pub mod app;
+pub mod counter;
 pub mod log;
-pub mod monitor;
 pub mod theme;
 
 pub use app::ConfigApp;

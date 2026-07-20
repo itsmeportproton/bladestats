@@ -20,6 +20,7 @@ repository = "https://github.com/bladestats/bladestats"
 bs-core = { path = "crates/bs-core" }
 bs-render = { path = "crates/bs-render" }
 bs-telemetry = { path = "crates/bs-telemetry" }
+bs-windows = { path = "crates/bs-windows" }
 
 ab_glyph = "0.2.32"
 anyhow = "1"

@@ -5,28 +5,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "bladestats overlay on Windows: an always-on-top window, D3D11 and DirectComposition"
+description = "The bladestats overlay on Windows: the window over the game, its renderer and frame timing"
 
+# A library only. bladestats ships as one executable, built in bs-config, which runs this
+# overlay on its own thread.
 [lib]
 name = "bs_windows"
 path = "src/lib.rs"
-
-[[bin]]
-name = "bladestats"
-path = "src/main.rs"
-# No test harness for the binary. Its manifest requires elevation, and cargo cannot launch an
-# elevated process, so building one would break `cargo test` outright. All tests live in the
-# library target.
-test = false
-
 
 [dependencies]
 bs-core.workspace = true
 bs-render.workspace = true
 bs-telemetry.workspace = true
 anyhow.workspace = true
+arc-swap.workspace = true
+toml.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 
 # ETW consumer, used for frame timing. Kept behind the FrameSource abstraction in etw.rs so it
 # can be swapped for raw windows-rs calls without touching anything else.
@@ -46,6 +40,7 @@ features = [
     "Win32_Security",
     "Win32_System_Diagnostics_Etw",
     "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
