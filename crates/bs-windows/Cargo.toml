@@ -7,9 +7,18 @@ license.workspace = true
 repository.workspace = true
 description = "bladestats overlay on Windows: an always-on-top window, D3D11 and DirectComposition"
 
+[lib]
+name = "bs_windows"
+path = "src/lib.rs"
+
 [[bin]]
 name = "bladestats"
 path = "src/main.rs"
+# No test harness for the binary. Its manifest requires elevation, and cargo cannot launch an
+# elevated process, so building one would break `cargo test` outright. All tests live in the
+# library target.
+test = false
+
 
 [dependencies]
 bs-core.workspace = true

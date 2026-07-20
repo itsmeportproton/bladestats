@@ -221,6 +221,12 @@ fn rows(s: &MetricsSnapshot, theme: &Theme) -> Vec<Vec<Span>> {
         ),
     ]);
 
+    // Explains a missing metric, so a blank frame rate reads as a known limitation rather
+    // than as a broken program.
+    if let Some(notice) = &s.notice {
+        rows.push(vec![Span::new(notice.clone(), theme.warn)]);
+    }
+
     rows
 }
 

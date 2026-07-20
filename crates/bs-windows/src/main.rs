@@ -1,13 +1,7 @@
-//! bladestats on Windows.
+//! bladestats on Windows: wiring, argument handling and the main loop.
 //!
-//! The overlay lives in its own window on top of the game and **injects nothing**: it loads no
-//! code into the game, hooks no `Present`, reads no foreign memory. That is also where its one
-//! limitation comes from — it only works in borderless ("fullscreen windowed") mode.
-
-mod etw;
-mod renderer;
-mod target;
-mod window;
+//! Everything substantial lives in the library next to this file; see its documentation for
+//! why the split exists.
 
 use std::time::{Duration, Instant};
 
@@ -20,8 +14,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage, WM_QUIT,
 };
 
-use crate::renderer::Renderer;
-use crate::window::OverlayWindow;
+use bs_windows::renderer::Renderer;
+use bs_windows::window::OverlayWindow;
+use bs_windows::{etw, target};
 
 /// Overlay font size. Becomes a setting once the config lands.
 const FONT_PX: f32 = 16.0;
@@ -56,6 +51,7 @@ fn main() -> Result<()> {
     let opts = HudOptions::default();
     let hub = SnapshotHub::new();
     let mut frames = None;
+    let mut notice = None;
     if demo {
         hub.store(demo_snapshot());
     } else {
@@ -67,7 +63,10 @@ fn main() -> Result<()> {
         // rather than to refuse to start.
         match etw::FrameSource::start() {
             Ok(source) => frames = Some(source),
-            Err(e) => tracing::warn!(error = %e, "frame rate unavailable"),
+            Err(e) => {
+                tracing::warn!(error = %e, "frame rate unavailable");
+                notice = Some("no FPS: run as administrator".to_string());
+            }
         }
     }
 
@@ -122,6 +121,15 @@ fn main() -> Result<()> {
             if let Some(t) = target::current(own_pid) {
                 if let Some(source) = &frames {
                     source.set_target(t.pid);
+                    let (seen, used) = source.observed_events();
+                    tracing::debug!(
+                        pid = t.pid,
+                        mode = ?t.mode,
+                        seen,
+                        used,
+                        fps = ?source.metrics(etw::now_ns()).map(|m| m.fps),
+                        "target"
+                    );
                 }
                 // Nothing can be composited over an exclusive-fullscreen swapchain, so the
                 // overlay hides instead of sitting invisibly behind it.
@@ -155,6 +163,7 @@ fn main() -> Result<()> {
             if let Some(source) = &frames {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
+            snapshot.notice = notice.clone();
             let (list, size) = hud::build(&atlas, &snapshot, &theme, &opts);
 
             let (w, h) = (size.width.ceil() as u32, size.height.ceil() as u32);

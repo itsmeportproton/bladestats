@@ -16,6 +16,12 @@ pub struct MetricsSnapshot {
     /// `None` while there is no frame source: on Windows without administrator rights, for
     /// instance, or when the focused window is not a game.
     pub frames: Option<FrameMetrics>,
+    /// Why something the user expected to see is missing.
+    ///
+    /// A dash says a value could not be read but not why, and "the frame rate is blank" is
+    /// indistinguishable from "the program is broken" unless the reason is on screen. The log
+    /// is not good enough: nobody running an overlay is watching a console.
+    pub notice: Option<String>,
 }
 
 /// A power figure together with where it came from.
