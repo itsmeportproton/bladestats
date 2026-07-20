@@ -1,0 +1,750 @@
+<title>bladestats &mdash; configurator design</title>
+
+<style>
+  :root {
+    /* Desktop behind the app window. Adapts, so the mockup never looks broken. */
+    --backdrop: #c9ccd2;
+    --backdrop-2: #aeb3bb;
+    --note: #4a4f57;
+    --note-strong: #1d2026;
+
+    /* The app window itself is committed dark: it configures a dark overlay and has to
+       look like it. These values are the overlay's own, from bs-core/src/theme.rs. */
+    --ground: #08090b;
+    --panel: #131519;
+    --panel-hi: #191c21;
+    --line: #24272e;
+    --text: #f0f0f0;
+    --muted: #a0a0a0;
+    --faint: #6a6f78;
+
+    /* Semantic, straight from the overlay's load scale. */
+    --good: #6fcf50;
+    --warn: #e8b339;
+
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+
+    --w: 580px;
+    --h: 700px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root { --backdrop: #1a1c20; --backdrop-2: #101216; --note: #8b9099; --note-strong: #e6e8ec; }
+  }
+  :root[data-theme="dark"] { --backdrop: #1a1c20; --backdrop-2: #101216; --note: #8b9099; --note-strong: #e6e8ec; }
+  :root[data-theme="light"] { --backdrop: #c9ccd2; --backdrop-2: #aeb3bb; --note: #4a4f57; --note-strong: #1d2026; }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--sans);
+    background: radial-gradient(120% 90% at 50% 0%, var(--backdrop) 0%, var(--backdrop-2) 100%);
+    color: var(--note);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+    padding: 36px 20px 56px;
+  }
+
+  .caption { max-width: 64ch; text-align: center; }
+  .caption h1 {
+    margin: 0 0 6px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--note-strong);
+  }
+  .caption p { margin: 0; font-size: 14px; line-height: 1.6; }
+
+  /* ================= vendor accents =================
+
+     The accent is not a house colour. Each device brings its own, so the window is coloured
+     by whatever hardware it found: matching parts give a single-colour window, mismatched
+     ones colour their own sections.
+
+     Two values per vendor. The brand colour fills solid shapes, where it sits under a dark
+     glyph and reads fine. "Ink" is the same hue lifted until it passes as text on a
+     near-black ground &mdash; Intel's #0071C5 lands around 3:1 unmodified, which is not
+     legible enough for a device name. */
+  .window[data-cpu="amd"]    { --cpu: #ed1c24; --cpu-ink: #ff5b5f; }
+  .window[data-cpu="intel"]  { --cpu: #0071c5; --cpu-ink: #4aa8ea; }
+  .window[data-gpu="amd"]    { --gpu: #ed1c24; --gpu-ink: #ff5b5f; }
+  .window[data-gpu="intel"]  { --gpu: #0071c5; --gpu-ink: #4aa8ea; }
+  .window[data-gpu="nvidia"] { --gpu: #76b900; --gpu-ink: #91d81c; }
+
+  /* Window chrome follows the graphics card. bladestats is a graphics tool, the card is the
+     headline part, and when both vendors match this resolves to the single colour anyway. */
+  .window { --accent: var(--gpu); --accent-ink: var(--gpu-ink); }
+
+  /* ---------- the app window ---------- */
+
+  .stage { display: flex; justify-content: center; }
+
+  .window {
+    width: var(--w);
+    height: var(--h);
+    background: var(--ground);
+    border-radius: 18px;
+    border: 1px solid #2a2e35;
+    box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* Opening sequence: a small rounded rect appears, holds, then expands outward to the
+     full window. Width and height are animated rather than a transform so the corner
+     radius stays true and the content never stretches. */
+  @keyframes seed-in {
+    from { opacity: 0; transform: scale(0.86); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes expand {
+    from { width: 96px; height: 118px; border-radius: 24px; }
+    to   { width: var(--w); height: var(--h); border-radius: 18px; }
+  }
+  @keyframes content-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .window.opening {
+    animation:
+      seed-in 280ms cubic-bezier(0.2, 0.8, 0.3, 1) both,
+      /* The hold before expanding is deliberate: the small rectangle has to register as a
+         thing in its own right before it flies apart. */
+      expand 640ms cubic-bezier(0.16, 0.84, 0.24, 1) 620ms both;
+  }
+  .window.opening .chrome { animation: content-in 320ms ease-out 1200ms both; }
+  .window.opening .feature { animation: row-in 340ms cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+  .window.opening .feature:nth-child(1)  { animation-delay: 1280ms; }
+  .window.opening .feature:nth-child(2)  { animation-delay: 1305ms; }
+  .window.opening .feature:nth-child(3)  { animation-delay: 1330ms; }
+  .window.opening .feature:nth-child(4)  { animation-delay: 1355ms; }
+  .window.opening .feature:nth-child(5)  { animation-delay: 1380ms; }
+  .window.opening .feature:nth-child(6)  { animation-delay: 1405ms; }
+  .window.opening .feature:nth-child(7)  { animation-delay: 1430ms; }
+  .window.opening .feature:nth-child(8)  { animation-delay: 1455ms; }
+  .window.opening .feature:nth-child(9)  { animation-delay: 1480ms; }
+  .window.opening .feature:nth-child(10) { animation-delay: 1505ms; }
+  .window.opening .feature:nth-child(11) { animation-delay: 1530ms; }
+  .window.opening .feature:nth-child(12) { animation-delay: 1555ms; }
+
+  @keyframes gentle-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Reduced motion gets a quieter arrival, not a dead one. Removing the animation outright
+     was the original bug: on any machine with "show animations" switched off the window just
+     appeared, and the piece being designed here was invisible.
+
+     Pressing a button labelled "replay opening" is unambiguous consent to see the motion, so
+     the forced class opts back in. */
+  @media (prefers-reduced-motion: reduce) {
+    .window.opening:not(.forced) { animation: gentle-in 260ms ease-out both; }
+    .window.opening:not(.forced) .chrome { animation: content-in 240ms ease-out 120ms both; }
+    .window.opening:not(.forced) .feature { animation: none; }
+  }
+
+  .chrome { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+  /* ---------- title bar ---------- */
+
+  .titlebar {
+    height: 38px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 8px;
+    cursor: default;
+  }
+
+  .lights { display: flex; gap: 8px; }
+  .light {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .light svg { opacity: 0; width: 7px; height: 7px; }
+  .lights:hover .light svg { opacity: 1; }
+  .light:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .light-close { background: #ff5f57; }
+  .light-min { background: #febc2e; }
+  .light svg path { stroke: rgba(0, 0, 0, 0.55); stroke-width: 1.6; stroke-linecap: round; }
+
+  /* ---------- header ---------- */
+
+  .header {
+    flex: 0 0 auto;
+    padding: 12px 26px 18px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 27px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  /* The overlay draws labels muted and values bright. The wordmark repeats that split. */
+  .wordmark b { font-weight: 700; color: var(--text); }
+  .wordmark span { font-weight: 400; color: var(--muted); }
+
+  /* The detected hardware, each part in its own vendor's colour. This is the legend for
+     everything else the window colours. */
+  .detected {
+    margin: 8px 0 0;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .detected .cpu { color: var(--cpu-ink); }
+  .detected .gpu { color: var(--gpu-ink); }
+  .detected .sep { color: #3a3f47; }
+
+  .version { text-align: right; flex: 0 0 auto; }
+  .version .num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .version .tag {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  /* ---------- body ---------- */
+
+  .body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 252px 1fr;
+    gap: 22px;
+    padding: 0 26px;
+  }
+
+  .col { display: flex; flex-direction: column; min-height: 0; }
+
+  .col-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: #34383f transparent;
+  }
+
+  .group-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: 14px 14px 6px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .panel > .group-label:first-child { padding-top: 12px; }
+
+  /* Groups about a specific device take that device's colour. Everything else uses the
+     window accent. */
+  .group-cpu { --tint: var(--cpu); }
+  .group-gpu { --tint: var(--gpu); }
+  .group-any { --tint: var(--accent); }
+
+  .group-label .chip {
+    width: 6px; height: 6px; border-radius: 2px;
+    background: var(--tint);
+    flex: 0 0 auto;
+  }
+
+  .group-note {
+    padding: 0 14px 8px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--faint);
+  }
+
+  .feature {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .feature:hover { background: var(--panel-hi); color: var(--text); }
+  .feature input { position: absolute; opacity: 0; pointer-events: none; }
+  .feature:has(input:focus-visible) { outline: 2px solid var(--tint); outline-offset: -2px; }
+
+  .check {
+    flex: 0 0 auto;
+    width: 15px; height: 15px;
+    border-radius: 4px;
+    border: 1px solid #3a3f47;
+    display: grid;
+    place-items: center;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .check svg { width: 9px; height: 9px; opacity: 0; }
+  .check svg path { stroke: #0a0a0a; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .feature input:checked + .check { background: var(--tint); border-color: var(--tint); }
+  .feature input:checked + .check svg { opacity: 1; }
+  .feature:has(input:checked) { color: var(--text); }
+
+  .feature .name { flex: 1 1 auto; }
+  .feature .note {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    flex: 0 0 auto;
+  }
+
+  /* ---------- release log ---------- */
+
+  .log {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding-right: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: #34383f transparent;
+  }
+
+  .entry { padding-bottom: 18px; }
+  .entry + .entry { border-top: 1px solid var(--line); padding-top: 16px; }
+
+  .entry-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px; }
+  .entry-ver {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .entry-date {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .entry ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  /* The bullet is positioned rather than laid out as a flex sibling. As a flex item it made
+     every inline <b> a flex item too, so the bold lead-ins collapsed into their own narrow
+     column instead of running on with the sentence. */
+  .entry li {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    position: relative;
+    padding-left: 12px;
+  }
+  .entry li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 8px;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: #3f444c;
+  }
+  .entry li.fix::before { background: var(--warn); }
+  .entry li b { color: var(--text); font-weight: 500; }
+
+  /* ---------- status bar ---------- */
+
+  .status {
+    flex: 0 0 auto;
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding: 12px 26px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+  }
+  .state { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 3px rgba(111, 207, 80, 0.14);
+  }
+  .status .cost { font-variant-numeric: tabular-nums; }
+
+  /* ---------- review controls (mockup only) ---------- */
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    align-items: center;
+    justify-content: center;
+    max-width: 720px;
+  }
+  .btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 8px 13px;
+    border-radius: 8px;
+    border: 1px solid var(--note);
+    background: transparent;
+    color: var(--note-strong);
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .btn:hover { background: rgba(127, 127, 127, 0.14); }
+  .btn:focus-visible { outline: 2px solid var(--note-strong); outline-offset: 2px; }
+  .btn[aria-pressed="true"] { background: var(--note-strong); color: var(--backdrop-2); border-color: var(--note-strong); }
+
+  .rig-label {
+    width: 100%;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--note);
+  }
+
+  .hint { font-size: 12px; max-width: 30ch; line-height: 1.45; display: none; }
+  @media (prefers-reduced-motion: reduce) { .hint { display: block; } }
+</style>
+
+<div class="caption">
+  <h1>Configurator &mdash; design pass 2</h1>
+  <p>
+    The window has no house colour. Each device brings its own, so matching parts give a
+    single-colour window and mismatched ones colour their own sections. Switch the hardware
+    below to see every combination.
+  </p>
+</div>
+
+<div class="controls">
+  <span class="rig-label">Detected hardware</span>
+  <button class="btn rig" data-cpu="amd" data-gpu="amd" aria-pressed="true">AMD + AMD</button>
+  <button class="btn rig" data-cpu="intel" data-gpu="intel" aria-pressed="false">Intel + Intel</button>
+  <button class="btn rig" data-cpu="amd" data-gpu="nvidia" aria-pressed="false">AMD + NVIDIA</button>
+  <button class="btn rig" data-cpu="intel" data-gpu="nvidia" aria-pressed="false">Intel + NVIDIA</button>
+  <button class="btn rig" data-cpu="intel" data-gpu="amd" aria-pressed="false">Intel + AMD</button>
+</div>
+
+<div class="controls">
+  <button class="btn" id="replay">Replay opening</button>
+  <p class="hint">
+    This system asks for reduced motion, so the window arrives quietly on load. Press the
+    button to see the full opening.
+  </p>
+</div>
+
+<div class="stage">
+  <div class="window opening" id="window" data-cpu="amd" data-gpu="amd">
+    <div class="chrome">
+
+      <div class="titlebar">
+        <div class="lights">
+          <button class="light light-close" aria-label="Close">
+            <svg viewBox="0 0 8 8"><path d="M1.5 1.5 6.5 6.5M6.5 1.5 1.5 6.5"/></svg>
+          </button>
+          <button class="light light-min" aria-label="Minimise">
+            <svg viewBox="0 0 8 8"><path d="M1.5 4h5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="header">
+        <div>
+          <h2 class="wordmark"><b>blade</b><span>stats</span></h2>
+          <p class="detected">
+            <span class="cpu" id="cpu-name">Ryzen 7 9700X</span>
+            <span class="sep">/</span>
+            <span class="gpu" id="gpu-name">Radeon RX 7800 XT</span>
+          </p>
+        </div>
+        <div class="version">
+          <div class="num">0.1.0</div>
+          <div class="tag">pre-release</div>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="col">
+          <p class="col-label">Features</p>
+          <div class="panel">
+
+            <div class="group-label group-any"><span class="chip"></span>Frame rate</div>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">FPS</span>
+            </label>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Frame time</span>
+            </label>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">1% low</span>
+            </label>
+            <label class="feature group-any">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">0.1% low</span>
+              <span class="note">1000 fr</span>
+            </label>
+
+            <div class="group-label group-cpu"><span class="chip"></span>Processor</div>
+            <label class="feature group-cpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Model name</span>
+            </label>
+            <label class="feature group-cpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Total load</span>
+            </label>
+            <label class="feature group-cpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Per-core bars</span>
+            </label>
+            <label class="feature group-cpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Clock speed</span>
+            </label>
+            <label class="feature group-cpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Power draw</span>
+              <span class="note">est.</span>
+            </label>
+
+            <div class="group-label group-gpu"><span class="chip"></span>Graphics</div>
+            <label class="feature group-gpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Model name</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Load</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">VRAM</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Temperature</span>
+              <span class="note" id="sensor-note">no AMD</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Power draw</span>
+              <span class="note" id="sensor-note-2">no AMD</span>
+            </label>
+
+            <div class="group-label group-any"><span class="chip"></span>Memory</div>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Usage</span>
+            </label>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Speed</span>
+            </label>
+
+            <div class="group-label group-gpu"><span class="chip"></span>Experimental</div>
+            <p class="group-note">
+              Inferred from how the game presents, not read from the driver. Expect these to be
+              wrong sometimes, and to break when a driver changes.
+            </p>
+            <label class="feature group-gpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Graphics API</span>
+              <span class="note">D3D12</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Generated frames</span>
+              <span class="note" id="fg-note">AFMF</span>
+            </label>
+            <label class="feature group-gpu">
+              <input type="checkbox">
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Render scale</span>
+              <span class="note" id="us-note">RSR</span>
+            </label>
+
+            <div class="group-label group-any"><span class="chip"></span>Appearance</div>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Vendor colours</span>
+            </label>
+            <label class="feature group-any">
+              <input type="checkbox" checked>
+              <span class="check"><svg viewBox="0 0 10 10"><path d="M1.5 5.2 3.8 7.5 8.5 2.5"/></svg></span>
+              <span class="name">Background panel</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="col">
+          <p class="col-label">Release log</p>
+          <div class="log">
+
+            <div class="entry">
+              <div class="entry-head">
+                <span class="entry-ver">0.1.0</span>
+                <span class="entry-date">2026-07-20</span>
+              </div>
+              <ul>
+                <li><b>Frame timing without injection.</b> FPS, frame time and low percentiles
+                  read from the graphics kernel's own events. Nothing is loaded into the game.</li>
+                <li><b>Direct3D and Vulkan alike.</b> Presents are counted at the kernel, so
+                  Vulkan titles report the same as Direct3D ones.</li>
+                <li><b>Per-core load and clocks</b>, with exact processor and graphics card
+                  names as Device Manager spells them.</li>
+                <li><b>Memory speed</b> read from firmware rather than through WMI.</li>
+                <li>Overlay composited on the GPU, so transparency costs nothing on the
+                  processor.</li>
+                <li class="fix"><b>Fixed:</b> VRAM showed 0.0 GB. It was reporting bladestats'
+                  own video memory instead of the whole system's.</li>
+                <li class="fix"><b>Fixed:</b> every graphics reading sat at zero on some
+                  machines, from a case-sensitive adapter match.</li>
+                <li class="fix"><b>Fixed:</b> frame rate stayed blank when launched without
+                  administrator rights, with no explanation on screen.</li>
+              </ul>
+            </div>
+
+            <div class="entry">
+              <div class="entry-head"><span class="entry-ver">Known limits</span></div>
+              <ul>
+                <li>Borderless only. Exclusive fullscreen cannot be drawn over, so the overlay
+                  hides itself there.</li>
+                <li>Graphics temperature and power need a vendor library; AMD and Intel are
+                  not read yet.</li>
+                <li>Processor power is an estimate, always marked with a tilde.</li>
+                <li>Memory power is never shown. Consumer boards have no sensor for it.</li>
+              </ul>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="status">
+        <span class="state"><span class="dot"></span>Overlay running</span>
+        <span class="cost">0.23% CPU &middot; 36 MB</span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const win = document.getElementById("window");
+
+  document.getElementById("replay").addEventListener("click", () => {
+    win.classList.remove("opening", "forced");
+    void win.offsetWidth; // force reflow so the animation restarts
+    // "forced" opts back into the full motion even where the system asks for less: the
+    // click is the consent.
+    win.classList.add("opening", "forced");
+  });
+
+  // Representative parts per vendor, so the header reads like a real machine rather than a
+  // placeholder.
+  const CPUS = { amd: "Ryzen 7 9700X", intel: "Core i7-14700K" };
+  const GPUS = { amd: "Radeon RX 7800 XT", intel: "Arc B580", nvidia: "GeForce RTX 4070" };
+  // Which vendor's frame generation and upscaling the graphics card would actually be using.
+  const FG = { amd: "AFMF", intel: "XeSS-FG", nvidia: "DLSS-FG" };
+  const US = { amd: "RSR", intel: "XeSS", nvidia: "DLSS" };
+
+  document.querySelectorAll(".rig").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cpu = btn.dataset.cpu;
+      const gpu = btn.dataset.gpu;
+
+      win.dataset.cpu = cpu;
+      win.dataset.gpu = gpu;
+      document.getElementById("cpu-name").textContent = CPUS[cpu];
+      document.getElementById("gpu-name").textContent = GPUS[gpu];
+      document.getElementById("fg-note").textContent = FG[gpu];
+      document.getElementById("us-note").textContent = US[gpu];
+
+      // Only NVIDIA has a sensor library wired up, so the note has to follow the card.
+      const sensors = gpu === "nvidia" ? "" : "no " + (gpu === "amd" ? "AMD" : "Intel");
+      document.getElementById("sensor-note").textContent = sensors;
+      document.getElementById("sensor-note-2").textContent = sensors;
+
+      document.querySelectorAll(".rig").forEach(b =>
+        b.setAttribute("aria-pressed", String(b === btn))
+      );
+    });
+  });
+</script>
