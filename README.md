@@ -54,5 +54,8 @@ cargo build --release
 
 ## Лицензия
 
-MIT — см. [LICENSE](LICENSE). Шрифт JetBrains Mono распространяется под Apache-2.0,
-её текст лежит рядом со шрифтом.
+Код — MIT, см. [LICENSE](LICENSE).
+
+Шрифт JetBrains Mono распространяется под SIL Open Font License 1.1 — её текст лежит рядом со
+шрифтом в [assets/fonts/LICENSE-JetBrainsMono.txt](assets/fonts/LICENSE-JetBrainsMono.txt) и
+обязан сопровождать любую сборку, в которую шрифт вшит.
