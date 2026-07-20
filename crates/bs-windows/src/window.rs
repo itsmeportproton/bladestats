@@ -49,6 +49,9 @@ impl OverlayWindow {
                 hInstance: instance.into(),
                 lpszClassName: CLASS_NAME,
                 hbrBackground: HBRUSH::default(),
+                // No class cursor on purpose. With one, the default message handler would
+                // restore it behind our back every time the pointer crossed the panel.
+                hCursor: HCURSOR::default(),
                 ..Default::default()
             };
             // Re-registering the same class is harmless and returns 0, so it is not checked.
@@ -185,6 +188,26 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
             // Backstop for WS_EX_TRANSPARENT: tell the system there is no hit here at all, so
             // the cursor and clicks go to whatever is underneath.
             WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+
+            // A pointer is not the same thing as a click, and the two travel by different
+            // routes. Hit-testing decides who receives a click; the cursor's *appearance* is
+            // decided separately, by asking whichever window the pointer is over. A game that
+            // has hidden its cursor for mouse-look hides it on its own window — so as the
+            // pointer wanders across this one, the system asks here instead and gets the
+            // default arrow back, and an arrow appears in the middle of the game.
+            //
+            // Answering with no cursor at all, and claiming the message as handled so the
+            // default handler does not put the arrow back, is what keeps it gone. There is
+            // nothing on this panel to point at in any case: it takes no clicks.
+            WM_SETCURSOR => {
+                let _ = SetCursor(None);
+                LRESULT(1)
+            }
+
+            // Belt to the WS_EX_NOACTIVATE braces: never take focus from the game, not even
+            // for the instant a click would otherwise do it.
+            WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)

@@ -21,11 +21,27 @@ const STALE_AFTER_NS: u64 = 1_000_000_000;
 const MIN_FRAMES_FOR_1PCT: usize = 100;
 const MIN_FRAMES_FOR_01PCT: usize = 1000;
 
+/// The span the displayed frame rate is measured over.
+///
+/// The rate has to be counted across a window rather than taken from the newest interval. A
+/// present timestamp is when the call was made, not when the frame was shown, and the two
+/// differ by a jittering amount: on a display locked to 144 Hz, individual intervals land
+/// anywhere between six and eight milliseconds even though every frame is shown on time.
+/// Inverting one of those reads 166, then 130, then 149 — a number that flickers wildly while
+/// the game is in fact perfectly steady.
+///
+/// Half a second is long enough to average the jitter away and short enough that a real drop
+/// is on screen almost at once.
+const RATE_WINDOW_NS: u64 = 500_000_000;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameMetrics {
-    /// Instantaneous FPS from the most recent frame interval.
+    /// Frames per second, counted over the last half second.
     pub fps: f32,
-    /// Duration of the most recent frame, in milliseconds.
+    /// Mean frame time over that same half second, in milliseconds.
+    ///
+    /// Deliberately the mean of the window rather than the newest interval, so that it and
+    /// [`FrameMetrics::fps`] are two views of one measurement and cannot disagree on screen.
     pub frametime_ms: f32,
     /// Mean FPS across the whole buffer.
     pub avg_fps: f32,
@@ -117,22 +133,50 @@ impl FrameTimeline {
             .map(|(a, b)| (b - a) as f32 / 1e6)
             .collect();
 
-        let frametime_ms = *frametimes_ms.last()?;
+        let (fps, frametime_ms) = self.recent_rate(last);
 
         // Percentiles are taken over frame times, not over FPS: a "1% low" is the slowest one
-        // percent of frames, and averaging reciprocals would be wrong.
+        // percent of frames, and averaging reciprocals would be wrong. These stay over the
+        // whole buffer and over individual intervals — a stutter is exactly the outlier the
+        // windowed rate is built to hide, and here it is the thing being looked for.
         frametimes_ms.sort_unstable_by(f32::total_cmp);
         let low_1pct = percentile_fps(&frametimes_ms, 0.99, MIN_FRAMES_FOR_1PCT);
         let low_01pct = percentile_fps(&frametimes_ms, 0.999, MIN_FRAMES_FOR_01PCT);
 
         Some(FrameMetrics {
-            fps: 1000.0 / frametime_ms,
+            fps,
             frametime_ms,
             avg_fps: avg_fps as f32,
             low_1pct,
             low_01pct,
             sample_count: self.times.len(),
         })
+    }
+
+    /// Frames per second and mean frame time over the last [`RATE_WINDOW_NS`].
+    ///
+    /// Falls back to the newest interval when the window holds too little to count — right
+    /// after a game launches, or once a second has passed with barely any frames in it. In
+    /// both cases one interval is genuinely all there is to report.
+    fn recent_rate(&self, last: u64) -> (f32, f32) {
+        let cutoff = last.saturating_sub(RATE_WINDOW_NS);
+        // Timestamps are strictly increasing, since `push` drops anything that is not.
+        let start = self.times.partition_point(|&t| t < cutoff);
+        let intervals = self.times.len().saturating_sub(start.max(1));
+
+        if intervals >= 2 {
+            let first = self.times[start.max(1) - 1];
+            let span = last.saturating_sub(first);
+            if span > 0 {
+                let fps = intervals as f64 * 1e9 / span as f64;
+                let frametime = span as f64 / intervals as f64 / 1e6;
+                return (fps as f32, frametime as f32);
+            }
+        }
+
+        let a = self.times[self.times.len() - 2];
+        let frametime = (last - a) as f32 / 1e6;
+        (1000.0 / frametime, frametime)
     }
 }
 
@@ -162,6 +206,89 @@ mod tests {
             t.push(i as u64 * interval_ms * MS);
         }
         t
+    }
+
+    /// A display-locked stream: every frame is shown on time, but the timestamp of the present
+    /// *call* wanders either side of the interval.
+    ///
+    /// This is not a contrived input. A present timestamp records when the game asked for the
+    /// frame, not when the display showed it, and the gap between those is what varies.
+    fn jittery(count: usize, interval_ns: u64, jitter_ns: u64) -> FrameTimeline {
+        let mut t = FrameTimeline::default();
+        // Deterministic wobble, so the test cannot pass or fail depending on the day.
+        let pattern = [0.0f64, 0.8, -0.9, 0.35, -0.5, 0.95, -0.3, 0.1];
+        for i in 0..count {
+            let base = i as u64 * interval_ns;
+            let offset = (pattern[i % pattern.len()] * jitter_ns as f64) as i64;
+            t.push((base as i64 + offset).max(0) as u64);
+        }
+        t
+    }
+
+    #[test]
+    fn a_vsynced_game_reports_its_refresh_rate_and_not_the_jitter() {
+        // 144 Hz with nearly a millisecond of wobble either way. Taken from the newest
+        // interval this reads anywhere from 130 to 166 and never settles; counted across a
+        // window it is simply 144.
+        const HZ_144_NS: u64 = 6_944_444;
+        let timeline = jittery(600, HZ_144_NS, 900_000);
+        let last = 599 * HZ_144_NS;
+        let m = timeline.metrics(last + MS).expect("frames were recorded");
+
+        assert!(
+            (m.fps - 144.0).abs() < 2.0,
+            "a locked 144 Hz game reported {} fps",
+            m.fps
+        );
+        assert!(
+            m.fps < 150.0,
+            "the reading overshot the refresh rate: {}",
+            m.fps
+        );
+        // And the two halves of the same measurement must agree on screen.
+        assert!(
+            (1000.0 / m.frametime_ms - m.fps).abs() < 0.5,
+            "{} fps against {} ms",
+            m.fps,
+            m.frametime_ms
+        );
+    }
+
+    #[test]
+    fn a_single_slow_frame_does_not_throw_the_headline_rate() {
+        // What the percentiles do with a lone stutter is settled elsewhere; this is only about
+        // the big number staying readable through one.
+        let mut t = steady(1200, 7);
+        let last = 1199 * 7 * MS + 60 * MS;
+        t.push(last);
+
+        let m = t.metrics(last + MS).unwrap();
+        // The rate does dip, and should: sixty milliseconds of nothing inside a half-second
+        // window is a real loss of frames, and hiding it would be the wrong kind of smoothing.
+        // What must not happen is the headline collapsing to the stutter's own 16 fps, which
+        // is exactly what inverting the newest interval used to do.
+        assert!(
+            (110.0..145.0).contains(&m.fps),
+            "one slow frame threw the rate to {}",
+            m.fps
+        );
+        // Inverting the newest interval, as this used to, would have read 16 fps here.
+        assert!(
+            m.fps > 100.0,
+            "the headline collapsed to the stutter itself: {}",
+            m.fps
+        );
+    }
+
+    #[test]
+    fn a_game_that_has_only_just_started_still_reports_something() {
+        // Two frames is not a window, but it is a measurement, and a blank frame rate for the
+        // first half second would read as the overlay being broken.
+        let mut t = FrameTimeline::default();
+        t.push(0);
+        t.push(10 * MS);
+        let m = t.metrics(11 * MS).expect("two frames are enough");
+        assert!((m.fps - 100.0).abs() < 1.0, "{}", m.fps);
     }
 
     #[test]
