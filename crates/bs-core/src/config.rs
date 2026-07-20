@@ -185,7 +185,28 @@ pub struct Config {
     pub theme: Theme,
     pub metrics: Metrics,
     pub experimental: Experimental,
+    pub behaviour: Behaviour,
     pub hotkeys: Hotkeys,
+}
+
+/// When the overlay shows itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Behaviour {
+    /// Keep the panel out of the way until a game is on screen.
+    ///
+    /// On by default: an overlay is for games, and on a desktop it is clutter. The toggle
+    /// hotkey overrides it either way, which is what makes leaving it on safe — a game the
+    /// detection misses costs one keypress rather than a broken-looking program.
+    pub only_in_games: bool,
+}
+
+impl Default for Behaviour {
+    fn default() -> Self {
+        Self {
+            only_in_games: true,
+        }
+    }
 }
 
 /// What happened while loading, so the caller can tell the user rather than guess.

@@ -12,19 +12,19 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bs_core::{Config, LoadOutcome, SnapshotHub};
+use bs_core::{Config, GameWatch, LoadOutcome, Presence, SnapshotHub};
 use bs_render::{GlyphAtlas, HudOptions};
 use bs_render::hud::{HudState, Motion};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
-    PeekMessageW, QS_ALLINPUT, TranslateMessage, WM_QUIT,
+    PeekMessageW, QS_ALLINPUT, TranslateMessage, WM_HOTKEY, WM_QUIT,
 };
 
 use crate::renderer::Renderer;
 use crate::selfstat::{self, ProfileLog, SelfStat};
 use crate::window::{self, OverlayWindow};
-use crate::{etw, target};
+use crate::{etw, hotkeys, target};
 
 /// How often the window is pushed back on top. Games reorder the window stack when they
 /// activate, and without this the overlay eventually ends up underneath.
@@ -109,7 +109,16 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut last_topmost = Instant::now();
     let mut last_target = Instant::now() - TARGET_INTERVAL;
     let mut last_config = Instant::now();
-    let mut visible = true;
+    let mut visible = false;
+
+    // Whether a game is on screen, and the user's override of that answer. `None` means follow
+    // the detection; the override is dropped as soon as the detection changes its mind, so a
+    // shortcut pressed during one game does not silently govern the next.
+    let mut watch = GameWatch::new();
+    let mut detected = false;
+    let mut forced: Option<bool> = None;
+    let _hotkeys = hotkeys::Hotkeys::register(&current.hotkeys);
+    let mut watched_pid = None;
 
     // What this process costs. Reported rather than assumed: the budget is one of the
     // project's headline claims and nothing else here would notice it being broken.
@@ -119,8 +128,21 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut context = selfstat::Context::default();
 
     loop {
-        if pump_messages() {
+        let pumped = pump_messages();
+        if pumped.quit {
             break;
+        }
+        if pumped.toggle {
+            // Flips whatever is on screen now and pins it, overriding the detection in
+            // whichever direction that has got it wrong. This escape hatch is what makes
+            // hiding by default safe to ship: a game the detection misses costs one keypress.
+            forced = Some(!forced.unwrap_or(detected));
+            tracing::info!(forced = forced.unwrap(), "toggled");
+        }
+        if pumped.reload {
+            // Makes the next poll see a difference, whatever the file's timestamp says.
+            config_stamp = None;
+            last_config = Instant::now() - CONFIG_POLL_INTERVAL;
         }
 
         if let Some(usage) = selfstat.sample() {
@@ -177,13 +199,40 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 if let Some(source) = &frames {
                     source.set_target(t.pid);
                 }
+                // A different process in front means the previous one's history says nothing
+                // about this one.
+                if watched_pid != Some(t.pid) {
+                    watched_pid = Some(t.pid);
+                    watch.reset();
+                }
+
+                let was = detected;
+                detected = watch.update(
+                    etw::now_ns(),
+                    t.mode == target::DisplayMode::Borderless,
+                    context.fps,
+                ) == Presence::Playing;
+                if detected != was {
+                    // The detection has changed its mind, so an override from before it did is
+                    // stale. Auto resumes on its own rather than needing to be switched back.
+                    forced = None;
+                    tracing::debug!(detected, "game detection");
+                }
+
                 // Nothing can be composited over an exclusive-fullscreen swapchain, so the
-                // overlay hides instead of sitting invisibly behind it.
-                context.visible = t.overlay_possible();
-                if t.overlay_possible() != visible {
-                    visible = t.overlay_possible();
+                // overlay hides there whatever else says otherwise.
+                let wanted = if current.behaviour.only_in_games {
+                    forced.unwrap_or(detected)
+                } else {
+                    forced.unwrap_or(true)
+                };
+                let show = wanted && t.overlay_possible();
+
+                context.visible = show;
+                if show != visible {
+                    visible = show;
                     overlay.show(visible);
-                    tracing::debug!(mode = ?t.mode, visible, "target changed");
+                    tracing::debug!(mode = ?t.mode, visible, detected, "visibility");
                 }
             }
         }
@@ -302,17 +351,38 @@ fn wait_for_work(handle: Option<HANDLE>, timeout: Duration) {
     }
 }
 
-/// Drains this thread's messages. Returns `true` when it is time to stop.
-fn pump_messages() -> bool {
+/// What came out of the message queue this time round.
+#[derive(Debug, Default)]
+struct Pumped {
+    quit: bool,
+    toggle: bool,
+    reload: bool,
+}
+
+/// Drains this thread's messages, collecting the shortcuts among them.
+fn pump_messages() -> Pumped {
+    let mut out = Pumped::default();
     unsafe {
         let mut msg = MSG::default();
         while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-            if msg.message == WM_QUIT {
-                return true;
+            match msg.message {
+                WM_QUIT => {
+                    out.quit = true;
+                    return out;
+                }
+                // Thread-targeted, so it arrives here rather than at the window procedure —
+                // which is where it needs to be, since acting on it means touching the loop's
+                // own state.
+                WM_HOTKEY => match hotkeys::Hotkeys::action(msg.wParam.0 as i32) {
+                    Some(hotkeys::Action::Toggle) => out.toggle = true,
+                    Some(hotkeys::Action::Reload) => out.reload = true,
+                    None => {}
+                },
+                _ => {}
             }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     }
-    false
+    out
 }

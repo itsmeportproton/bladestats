@@ -10,6 +10,7 @@
 //! configures it arrive together while the counter keeps its own small footprint.
 
 pub mod etw;
+pub mod hotkeys;
 pub mod overlay;
 pub mod renderer;
 pub mod selfstat;

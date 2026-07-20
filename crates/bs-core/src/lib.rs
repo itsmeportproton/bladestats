@@ -6,12 +6,18 @@
 
 pub mod config;
 pub mod frames;
+pub mod gamewatch;
+pub mod hotkey;
 pub mod hub;
 pub mod snapshot;
 pub mod theme;
 
-pub use config::{Config, Corner, Experimental, Hotkeys, LoadOutcome, Metrics, Placement};
+pub use config::{
+    Behaviour, Config, Corner, Experimental, Hotkeys, LoadOutcome, Metrics, Placement,
+};
 pub use frames::{FrameMetrics, FrameTimeline};
+pub use gamewatch::{GameWatch, Presence};
+pub use hotkey::Hotkey;
 pub use hub::SnapshotHub;
 pub use snapshot::{
     CoreMetrics, CpuMetrics, GpuMetrics, MemoryMetrics, MetricsSnapshot, Power, Vendor,
