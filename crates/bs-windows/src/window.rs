@@ -77,6 +77,20 @@ impl OverlayWindow {
             )
             .context("CreateWindowExW")?;
 
+            // The cursor's visibility is counted per input queue, not per desktop. A game that
+            // hides its cursor for mouse-look hides it on *its* queue; this thread's counter is
+            // untouched and still says "visible", so the moment the pointer crosses this
+            // window the arrow comes back — in the middle of the game, while the camera is
+            // moving. Hiding it here too makes the two queues agree.
+            //
+            // This is separate from click-through and does not replace it: one decides where a
+            // click lands, the other decides what is drawn under the pointer. Fixing only the
+            // first is what left the arrow showing.
+            //
+            // Safe to do unconditionally: there is nothing on this panel to point at. It takes
+            // no clicks and holds no focus.
+            while ShowCursor(false) >= 0 {}
+
             Ok(Self { hwnd })
         }
     }
