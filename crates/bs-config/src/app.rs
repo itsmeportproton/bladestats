@@ -88,7 +88,10 @@ impl ConfigApp {
             pending_save: None,
             saved_at: None,
             save_error: None,
-            monitor_open: false,
+            // `--monitor` opens the preview straight away. Useful while working on the
+            // preview itself, since reaching the button first means the window has to be
+            // clicked, which is awkward to automate.
+            monitor_open: std::env::args().any(|a| a == "--monitor"),
         }
     }
 

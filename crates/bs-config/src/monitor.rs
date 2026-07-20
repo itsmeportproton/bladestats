@@ -23,12 +23,15 @@ pub fn show(
     gpu_vendor: Vendor,
     open: &mut bool,
 ) {
+    // No transparency requested, unlike the main window. This one fills itself edge to edge
+    // with the stand-in game frame, so transparency would buy nothing but rounded outer
+    // corners &mdash; and asking for it failed outright on this machine's OpenGL driver
+    // ("the GL config does not support it"), which left black squares in those corners.
     let viewport = ViewportBuilder::default()
         .with_title("bladestats monitor")
         .with_inner_size(SIZE)
         .with_resizable(false)
-        .with_decorations(false)
-        .with_transparent(true);
+        .with_decorations(false);
 
     let mut closed = false;
     ctx.show_viewport_immediate(ViewportId::from_hash_of("monitor"), viewport, |ctx, _| {
@@ -54,9 +57,11 @@ pub fn show(
 /// half-transparent panel pass as opaque.
 fn paint_scene(ui: &Ui, rect: Rect) {
     let p = ui.painter();
+    // Square corners: the window itself is opaque, so rounding here would only reveal the
+    // clear colour behind it.
     p.rect_filled(
         rect,
-        CornerRadius::same(14),
+        CornerRadius::ZERO,
         Color32::from_rgb(0x10, 0x18, 0x21),
     );
 
