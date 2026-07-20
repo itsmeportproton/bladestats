@@ -6,8 +6,9 @@ and Linux.
 No installer, no service, no account, no telemetry. A single executable that draws your CPU,
 GPU, memory and frame rate on top of a game and otherwise stays out of the way.
 
-**Status: work in progress.** The overlay window and renderer are working; hardware telemetry
-and FPS are not wired up yet.
+**Status: work in progress.** The overlay, hardware telemetry and frame timing all work on
+Windows. Configuration is still hard-coded, AMD and Intel GPU sensors are not read yet, and
+the Linux side does not exist.
 
 ## Design constraints
 
@@ -32,9 +33,15 @@ it is measured rather than assumed. On an idle desktop, release build:
 
 | | Measured | Goal |
 |---|---|---|
-| CPU | 0.05% of one core | under 1% |
+| CPU, no frame timing | 0.05% of one core | under 1% |
+| CPU, with frame timing | 0.23% of one core | under 1% |
 | Private memory | 36 MB | under 30 MB — **not met** |
 | Binary | 1.2 MB | — |
+
+Frame timing costs about four times the rest of the overlay put together. That is the price of
+running an ETW session at all: the events are filtered down by the kernel — 891,000 raw events
+became 2,770 without changing the result — yet the session infrastructure itself dominates
+what remains.
 
 The memory goal is currently missed. Most of the footprint is the graphics stack the overlay
 has to load in order to draw at all — D3D11, DXGI and the display driver account for the bulk
@@ -70,7 +77,7 @@ timings and leaves it at that.
 The same principle runs through the whole UI: a metric that could not be read is drawn as a
 dash, never as a zero.
 
-## Building
+## Building and running
 
 ```sh
 cargo build --release
@@ -78,6 +85,18 @@ cargo build --release
 
 The font file is not stored in the repository — see
 [assets/fonts/README.md](assets/fonts/README.md).
+
+**Frame timing needs administrator rights**, because creating a real-time ETW session is a
+privileged operation. Started without them, bladestats runs anyway and shows a dash where the
+frame rate would be; everything else works unelevated.
+
+Two flags help when something looks wrong:
+
+- `--demo` fills the overlay with fabricated metrics, for checking appearance without hardware
+  access;
+- `--etw-selftest` points frame timing at bladestats itself. Its own present rate is known
+  exactly, so the reported figure can be checked against a number the program controls rather
+  than against a guess.
 
 ## Licence
 

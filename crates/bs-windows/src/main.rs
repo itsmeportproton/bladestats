@@ -4,7 +4,9 @@
 //! code into the game, hooks no `Present`, reads no foreign memory. That is also where its one
 //! limitation comes from — it only works in borderless ("fullscreen windowed") mode.
 
+mod etw;
 mod renderer;
+mod target;
 mod window;
 
 use std::time::{Duration, Instant};
@@ -32,6 +34,9 @@ const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 /// activate, and without this the overlay eventually ends up underneath.
 const TOPMOST_INTERVAL: Duration = Duration::from_secs(1);
 
+/// How often the foreground window is re-examined to decide what to report on.
+const TARGET_INTERVAL: Duration = Duration::from_millis(500);
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -50,11 +55,34 @@ fn main() -> Result<()> {
     let theme = Theme::default();
     let opts = HudOptions::default();
     let hub = SnapshotHub::new();
+    let mut frames = None;
     if demo {
         hub.store(demo_snapshot());
     } else {
         // Sampling runs on its own thread so a slow PDH query can never stall a redraw.
         bs_telemetry::spawn(hub.clone());
+
+        // Frame timing is optional by design. Without administrator rights the ETW session
+        // cannot be created, and the right response is to carry on without a frame rate
+        // rather than to refuse to start.
+        match etw::FrameSource::start() {
+            Ok(source) => frames = Some(source),
+            Err(e) => tracing::warn!(error = %e, "frame rate unavailable"),
+        }
+    }
+
+    // In self-test mode the source watches bladestats itself. Our own present rate is known
+    // exactly — it is REDRAW_INTERVAL — so the reported figure can be checked against a
+    // number we control, without needing a game to hand.
+    let selftest = std::env::args().any(|a| a == "--etw-selftest");
+    let own_pid = std::process::id();
+    if selftest && let Some(source) = &frames {
+        source.set_target(own_pid);
+        tracing::info!(
+            pid = own_pid,
+            expected_fps = 1000 / REDRAW_INTERVAL.as_millis(),
+            "self-test: tracing our own presents"
+        );
     }
 
     // The layout drives the window size, not the other way round: the HUD knows how much room
@@ -76,6 +104,8 @@ fn main() -> Result<()> {
 
     let mut last_draw = Instant::now() - REDRAW_INTERVAL;
     let mut last_topmost = Instant::now();
+    let mut last_target = Instant::now() - TARGET_INTERVAL;
+    let mut visible = true;
 
     loop {
         if pump_messages() {
@@ -87,10 +117,44 @@ fn main() -> Result<()> {
             last_topmost = Instant::now();
         }
 
+        if !selftest && last_target.elapsed() >= TARGET_INTERVAL {
+            last_target = Instant::now();
+            if let Some(t) = target::current(own_pid) {
+                if let Some(source) = &frames {
+                    source.set_target(t.pid);
+                }
+                // Nothing can be composited over an exclusive-fullscreen swapchain, so the
+                // overlay hides instead of sitting invisibly behind it.
+                if t.overlay_possible() != visible {
+                    visible = t.overlay_possible();
+                    overlay.show(visible);
+                    tracing::debug!(mode = ?t.mode, visible, "target changed");
+                }
+            }
+        }
+
+        if selftest && last_target.elapsed() >= Duration::from_secs(2) {
+            last_target = Instant::now();
+            if let Some(source) = &frames {
+                let (seen, used) = source.observed_events();
+                let measured = source.metrics(etw::now_ns()).map(|m| m.avg_fps);
+                tracing::info!(
+                    seen,
+                    used,
+                    ?measured,
+                    expected = 1000 / REDRAW_INTERVAL.as_millis(),
+                    "self-test"
+                );
+            }
+        }
+
         if last_draw.elapsed() >= REDRAW_INTERVAL {
             last_draw = Instant::now();
 
-            let snapshot = hub.load();
+            let mut snapshot = (*hub.load()).clone();
+            if let Some(source) = &frames {
+                snapshot.frames = source.metrics(etw::now_ns());
+            }
             let (list, size) = hud::build(&atlas, &snapshot, &theme, &opts);
 
             let (w, h) = (size.width.ceil() as u32, size.height.ceil() as u32);

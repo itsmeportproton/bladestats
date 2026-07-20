@@ -19,6 +19,10 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+# ETW consumer, used for frame timing. Kept behind the FrameSource abstraction in etw.rs so it
+# can be swapped for raw windows-rs calls without touching anything else.
+ferrisetw = "1.2"
+
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.62"
 features = [
@@ -30,7 +34,11 @@ features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Etw",
     "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
     "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
