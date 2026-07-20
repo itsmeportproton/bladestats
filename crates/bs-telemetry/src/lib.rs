@@ -54,6 +54,19 @@ pub fn samplers() -> Vec<Box<dyn Sampler>> {
     }
 }
 
+/// Takes a single reading and returns it.
+///
+/// For callers that want to know what hardware is present without running a loop &mdash; the
+/// configurator colours itself by the detected vendors and needs the answer once, at startup.
+/// Rate-based readings such as load will be absent, since those need two samples to exist.
+pub fn sample_once() -> MetricsSnapshot {
+    let mut snapshot = MetricsSnapshot::default();
+    for sampler in &mut samplers() {
+        sampler.sample(&mut snapshot);
+    }
+    snapshot
+}
+
 /// Runs the sampling loop on its own thread, publishing into `hub`.
 ///
 /// The thread owns the samplers; nothing else touches them. It never exits, and it never

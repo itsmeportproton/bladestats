@@ -1,0 +1,39 @@
+[package]
+name = "bs-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The bladestats configurator: edits the settings the overlay reads"
+
+[lib]
+name = "bs_config"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bladestats-config"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+bs-core.workspace = true
+bs-telemetry.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# The configurator is launched on demand and closed again, so its size does not touch the
+# overlay's footprint. Native rather than a webview: a webview runtime is not guaranteed to be
+# installed, and "portable" has to stay true.
+eframe = { version = "0.35", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+egui = "0.35"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]

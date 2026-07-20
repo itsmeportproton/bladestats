@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/bs-config",
     "crates/bs-core",
     "crates/bs-render",
     "crates/bs-telemetry",
