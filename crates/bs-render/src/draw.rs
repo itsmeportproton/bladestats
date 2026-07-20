@@ -1,21 +1,21 @@
-//! Список отрисовки: текст и прямоугольники превращаются в текстурированные квады.
+//! Draw list: text and rectangles become textured quads.
 //!
-//! Платформенный бэкенд получает готовые вершины в пиксельных координатах (начало в левом
-//! верхнем углу оверлея) и делает ровно две вещи: переводит их в NDC и рисует одним вызовом
-//! с атласом на входе. Никакой платформенной логики раскладки не существует.
+//! The platform backend receives finished vertices in pixel coordinates (origin at the
+//! overlay's top-left) and does exactly two things: converts them to NDC and issues one draw
+//! call with the atlas bound. No layout logic exists on the platform side.
 
 use bs_core::Color;
 
 use crate::atlas::GlyphAtlas;
 
-/// Вершина. `#[repr(C)]` обязателен: буфер уезжает в графическое API как есть.
+/// A vertex. `#[repr(C)]` is mandatory: the buffer goes to the graphics API as-is.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
-    /// Пиксели, начало в левом верхнем углу оверлея.
+    /// Pixels, origin at the overlay's top-left.
     pub pos: [f32; 2],
     pub uv: [f32; 2],
-    /// Premultiplied alpha — в таком виде ждут и D3D11-swapchain композиции, и Vulkan.
+    /// Premultiplied alpha — the form both a D3D11 composition swapchain and Vulkan expect.
     pub color: [f32; 4],
 }
 
@@ -67,8 +67,8 @@ impl DrawList {
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    /// Прямоугольник сплошного цвета. Рисуется белым текселем атласа, поэтому не требует
-    /// отдельного шейдера или второго вызова отрисовки.
+    /// A solid-colour rectangle. Drawn with the atlas's opaque texel, so it needs neither a
+    /// separate shader nor a second draw call.
     pub fn rect(&mut self, atlas: &GlyphAtlas, x: f32, y: f32, w: f32, h: f32, color: Color) {
         if color.a == 0 || w <= 0.0 || h <= 0.0 {
             return;
@@ -77,9 +77,10 @@ impl DrawList {
         self.quad(x, y, w, h, uv, uv, color.to_premultiplied_f32());
     }
 
-    /// Рисует текст пером в точке `(x, baseline_y)` и возвращает конечную позицию пера.
+    /// Draws text with the pen at `(x, baseline_y)` and returns the final pen position.
     ///
-    /// Символы, которых нет в атласе, пропускаются с сохранением шага — строка не съезжает.
+    /// Characters missing from the atlas are skipped but still advance the pen, so the line
+    /// does not shift.
     pub fn text(
         &mut self,
         atlas: &GlyphAtlas,
@@ -153,11 +154,11 @@ mod tests {
         list.rect(&atlas, 0.0, 0.0, 10.0, 10.0, Color::TRANSPARENT);
         assert!(
             list.is_empty(),
-            "прозрачный фон не должен попадать в буфер вершин"
+            "a transparent background must not reach the vertex buffer"
         );
 
-        // ...но перо всё равно двигается, иначе раскладка поедет.
-        let pen = list.text(&atlas, 0.0, 0.0, "невидимо", Color::rgba(255, 255, 255, 0));
+        // ...but the pen still moves, or the layout would drift.
+        let pen = list.text(&atlas, 0.0, 0.0, "invisible", Color::rgba(255, 255, 255, 0));
         assert!(list.is_empty());
         assert!(pen > 0.0);
     }
@@ -188,7 +189,7 @@ mod tests {
         only_spaces.text(&atlas, 0.0, 0.0, "   ", Color::WHITE);
         assert!(
             only_spaces.is_empty(),
-            "пробелы не рисуются, только двигают перо"
+            "spaces only move the pen, they do not draw"
         );
     }
 
@@ -196,7 +197,7 @@ mod tests {
     fn missing_glyphs_keep_the_line_aligned() {
         let atlas = atlas_or_skip!();
         let mut list = DrawList::new();
-        // Иероглифа в атласе нет: он не рисуется, но занимает ячейку.
+        // Not in the atlas: no ink, but it still occupies a cell.
         let pen = list.text(&atlas, 0.0, 0.0, "漢", Color::WHITE);
         assert!(list.is_empty());
         assert!((pen - atlas.advance).abs() < 1e-3);
@@ -210,10 +211,10 @@ mod tests {
         list.rect(&atlas, 0.0, 0.0, 4.0, 4.0, half);
 
         let c = list.vertices[0].color;
-        assert!((c[3] - 0.5).abs() < 0.01, "альфа");
+        assert!((c[3] - 0.5).abs() < 0.01, "alpha");
         assert!(
             (c[0] - c[3]).abs() < 0.01,
-            "красный premultiplied равен альфе"
+            "premultiplied red equals the alpha"
         );
         assert_eq!(c[1], 0.0);
     }
@@ -222,7 +223,7 @@ mod tests {
     fn clear_resets_the_list_for_the_next_frame() {
         let atlas = atlas_or_skip!();
         let mut list = DrawList::new();
-        list.text(&atlas, 0.0, 0.0, "мусор", Color::WHITE);
+        list.text(&atlas, 0.0, 0.0, "leftovers", Color::WHITE);
         list.clear();
         assert!(list.is_empty());
         assert!(list.vertices.is_empty());
@@ -238,12 +239,12 @@ mod tests {
         let n = list.vertices.len() as u32;
         assert!(
             list.indices.iter().all(|&i| i < n),
-            "индекс за пределами буфера вершин"
+            "index past the end of the vertex buffer"
         );
         assert_eq!(
             list.indices.len() % 6,
             0,
-            "геометрия состоит из целых квадов"
+            "geometry consists of whole quads"
         );
     }
 }

@@ -1,34 +1,34 @@
-//! Снимок всех метрик в один момент времени.
+//! A snapshot of every metric at one instant.
 //!
-//! Ключевое соглашение: **отсутствующий сенсор — это `None`, а не ноль**. Ноль ватт и
-//! «ватты неизвестны» — разные вещи, и UI обязан их различать, иначе пользователь увидит
-//! правдоподобное враньё.
+//! The governing rule: **a missing sensor is `None`, never zero**. "Zero watts" and "watts
+//! unknown" are different facts, and the UI has to distinguish them, or the user is shown
+//! plausible-looking fiction.
 
 use crate::frames::FrameMetrics;
 use crate::theme::Color;
 
-/// Всё, что bladestats знает о системе прямо сейчас.
+/// Everything bladestats currently knows about the machine.
 #[derive(Debug, Clone, Default)]
 pub struct MetricsSnapshot {
     pub cpu: CpuMetrics,
     pub gpu: GpuMetrics,
     pub memory: MemoryMetrics,
-    /// `None`, пока нет источника кадров: например, на Windows без прав администратора
-    /// или когда в фокусе не игра.
+    /// `None` while there is no frame source: on Windows without administrator rights, for
+    /// instance, or when the focused window is not a game.
     pub frames: Option<FrameMetrics>,
 }
 
-/// Значение мощности вместе с тем, откуда оно взялось.
+/// A power figure together with where it came from.
 ///
-/// На Windows ватты CPU нельзя прочитать из MSR без ring0-драйвера, а такой драйвер
-/// противоречит цели проекта не привлекать внимание анти-читов. Поэтому там значение
-/// вычисляется из загрузки, частот и TDP — и UI обязан показать его иначе, чем показание
-/// настоящего сенсора.
+/// On Windows, CPU package power cannot be read without a kernel-mode driver, and such a
+/// driver would carry more anti-cheat risk than the rest of the project combined. The figure
+/// there is derived from load, clocks and TDP instead — and the UI must render it differently
+/// from a real sensor reading.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Power {
-    /// Прочитано с сенсора: NVML, RAPL, hwmon.
+    /// Read from a sensor: NVML, RAPL, hwmon.
     Measured(f32),
-    /// Вычислено по модели. Рисуется с тильдой: `~65 W`.
+    /// Derived from a model. Drawn with a tilde: `~65 W`.
     Estimated(f32),
 }
 
@@ -46,11 +46,11 @@ impl Power {
 
 #[derive(Debug, Clone, Default)]
 pub struct CpuMetrics {
-    /// Точное имя из диспетчера устройств / `/proc/cpuinfo`.
+    /// The exact model string, as Device Manager or `/proc/cpuinfo` reports it.
     pub name: Option<String>,
-    /// По одной записи на логическое ядро, в порядке нумерации ОС.
+    /// One entry per logical core, in the order the OS numbers them.
     pub cores: Vec<CoreMetrics>,
-    /// Суммарная загрузка, 0.0..=100.0.
+    /// Total load, 0.0..=100.0.
     pub load_pct: Option<f32>,
     pub temp_c: Option<f32>,
     pub power: Option<Power>,
@@ -60,13 +60,13 @@ pub struct CpuMetrics {
 pub struct CoreMetrics {
     /// 0.0..=100.0
     pub load_pct: f32,
-    /// Фактическая частота, а не базовая.
+    /// The actual clock, not the base clock.
     pub freq_mhz: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct GpuMetrics {
-    /// Точное имя из диспетчера устройств.
+    /// The exact model string, as Device Manager reports it.
     pub name: Option<String>,
     pub vendor: Vendor,
     pub load_pct: Option<f32>,
@@ -81,10 +81,10 @@ pub struct GpuMetrics {
 pub struct MemoryMetrics {
     pub used_bytes: Option<u64>,
     pub total_bytes: Option<u64>,
-    /// Настроенная частота (не максимальная из SPD). Читается один раз на старте.
+    /// The configured speed, not the maximum from SPD. Read once at startup.
     pub speed_mhz: Option<u32>,
-    // Ватт здесь нет и не будет: у памяти на потребительских платформах нет сенсора
-    // мощности — ни в SPD, ни в SMBIOS, ни в hwmon.
+    // There is no power field here and there will not be one: consumer platforms expose no
+    // power sensor for memory, not in SPD, not in SMBIOS, not in hwmon.
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -97,7 +97,7 @@ pub enum Vendor {
 }
 
 impl Vendor {
-    /// PCI vendor ID → вендор. Работает и для GPU, и для хост-моста CPU.
+    /// PCI vendor ID to vendor. Works for GPUs and for CPU host bridges alike.
     pub fn from_pci_id(id: u16) -> Self {
         match id {
             0x1002 | 0x1022 => Vendor::Amd,
@@ -107,8 +107,8 @@ impl Vendor {
         }
     }
 
-    /// Грубый разбор имени устройства — костыль для источников, отдающих только строку
-    /// (DXGI description, `/proc/cpuinfo`).
+    /// Crude name matching, for sources that only hand over a string: DXGI adapter
+    /// descriptions, `/proc/cpuinfo` and the like.
     pub fn from_name(name: &str) -> Self {
         let n = name.to_ascii_lowercase();
         if n.contains("nvidia") || n.contains("geforce") || n.contains("quadro") {
@@ -122,7 +122,7 @@ impl Vendor {
         }
     }
 
-    /// Фирменный цвет вендора. Используется, когда в конфиге включён `vendor_colors`.
+    /// The vendor's brand colour, used when `vendor_colors` is enabled in the config.
     pub fn color(self) -> Option<Color> {
         match self {
             Vendor::Amd => Some(Color::rgb(0xED, 0x1C, 0x24)),
@@ -141,7 +141,7 @@ mod tests {
     fn power_keeps_its_provenance() {
         assert!(Power::Estimated(65.0).is_estimated());
         assert!(!Power::Measured(65.0).is_estimated());
-        // Одинаковое число из разных источников — не одно и то же значение.
+        // The same number from different sources is not the same value.
         assert_ne!(Power::Estimated(65.0), Power::Measured(65.0));
     }
 

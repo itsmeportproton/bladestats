@@ -1,8 +1,8 @@
-//! Платформо-независимое ядро bladestats.
+//! Platform-independent core of bladestats.
 //!
-//! Здесь нет ни Win32, ни Vulkan, ни sysfs — только типы метрик, арифметика таймингов кадров,
-//! тема и конфиг. Всё, что знает про конкретную ОС, живёт в `bs-telemetry`, `bs-windows` и
-//! `bs-linux-layer` и общается с ядром через [`MetricsSnapshot`].
+//! No Win32, no Vulkan, no sysfs here — only metric types, frame timing arithmetic, theme and
+//! config. Everything that knows about a specific OS lives in `bs-telemetry`, `bs-windows` and
+//! `bs-linux-layer`, and talks to the core through [`MetricsSnapshot`].
 
 pub mod frames;
 pub mod hub;

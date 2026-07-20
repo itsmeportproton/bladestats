@@ -1,42 +1,43 @@
-//! Тайминги кадров: из потока present-таймстампов считаются FPS, frametime и низкие перцентили.
+//! Frame timing: FPS, frame time and low percentiles derived from a stream of present
+//! timestamps.
 //!
-//! Источник таймстампов платформенный (ETW на Windows, Vulkan-слой на Linux), но арифметика
-//! общая и живёт здесь — она же единственная часть проекта, которую можно нормально покрыть
-//! юнит-тестами.
+//! The timestamps are platform-specific (ETW on Windows, a Vulkan layer on Linux) but the
+//! arithmetic is shared and lives here — it is also the one part of the project that unit
+//! tests can cover properly.
 
 use std::collections::VecDeque;
 
-/// Сколько кадров держим в кольцевом буфере.
+/// How many frames the ring buffer holds.
 ///
-/// 0.1% low требует хотя бы тысячи кадров, чтобы вообще что-то значить, поэтому запас
-/// выбран с расчётом на несколько секунд при высоком FPS.
+/// A 0.1% low needs at least a thousand frames to mean anything, so the capacity is sized for
+/// several seconds at a high frame rate.
 const DEFAULT_CAPACITY: usize = 4096;
 
-/// Если игра не презентила дольше этого времени — считаем, что кадров нет, и не показываем
-/// «замороженный» FPS от предыдущей сцены.
+/// If the game has not presented for longer than this, treat the stream as dead rather than
+/// showing a frozen number from the previous scene.
 const STALE_AFTER_NS: u64 = 1_000_000_000;
 
-/// Минимум кадров, ниже которого соответствующий перцентиль не имеет смысла и не считается.
+/// Below these sample counts the corresponding percentile is meaningless and is not computed.
 const MIN_FRAMES_FOR_1PCT: usize = 100;
 const MIN_FRAMES_FOR_01PCT: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameMetrics {
-    /// Мгновенный FPS по последнему интервалу между кадрами.
+    /// Instantaneous FPS from the most recent frame interval.
     pub fps: f32,
-    /// Длительность последнего кадра в миллисекундах.
+    /// Duration of the most recent frame, in milliseconds.
     pub frametime_ms: f32,
-    /// Средний FPS по всему содержимому буфера.
+    /// Mean FPS across the whole buffer.
     pub avg_fps: f32,
-    /// FPS, соответствующий 99-му перцентилю frametime. `None`, если кадров слишком мало.
+    /// FPS corresponding to the 99th percentile frame time. `None` if there are too few frames.
     pub low_1pct: Option<f32>,
-    /// FPS, соответствующий 99.9-му перцентилю frametime. `None`, если кадров слишком мало.
+    /// FPS corresponding to the 99.9th percentile frame time. `None` if there are too few frames.
     pub low_01pct: Option<f32>,
-    /// Сколько кадров участвовало в расчёте.
+    /// How many frames went into the calculation.
     pub sample_count: usize,
 }
 
-/// Кольцевой буфер present-таймстампов в наносекундах.
+/// Ring buffer of present timestamps, in nanoseconds.
 #[derive(Debug)]
 pub struct FrameTimeline {
     times: VecDeque<u64>,
@@ -53,7 +54,7 @@ impl FrameTimeline {
     pub fn with_capacity(capacity: usize) -> Self {
         assert!(
             capacity >= 2,
-            "буфер кадров бессмыслен меньше двух элементов"
+            "a frame buffer smaller than two is meaningless"
         );
         Self {
             times: VecDeque::with_capacity(capacity),
@@ -61,10 +62,11 @@ impl FrameTimeline {
         }
     }
 
-    /// Добавляет таймстамп кадра.
+    /// Records a frame timestamp.
     ///
-    /// Не-возрастающие значения отбрасываются: ETW доставляет события пачками и порядок
-    /// внутри пачки не гарантирован, а отрицательный frametime сломал бы всю статистику.
+    /// Non-increasing values are dropped: ETW delivers events in batches with no ordering
+    /// guarantee inside a batch, and a negative frame time would corrupt every statistic
+    /// downstream.
     pub fn push(&mut self, timestamp_ns: u64) {
         if let Some(&last) = self.times.back()
             && timestamp_ns <= last
@@ -77,7 +79,7 @@ impl FrameTimeline {
         self.times.push_back(timestamp_ns);
     }
 
-    /// Забывает всю историю — например, при смене игры в фокусе.
+    /// Discards all history — when the focused game changes, for example.
     pub fn clear(&mut self) {
         self.times.clear();
     }
@@ -86,10 +88,10 @@ impl FrameTimeline {
         self.times.is_empty()
     }
 
-    /// Считает метрики на момент `now_ns`.
+    /// Computes metrics as of `now_ns`.
     ///
-    /// Возвращает `None`, если кадров меньше двух или последний кадр слишком старый —
-    /// лучше не показать ничего, чем показать FPS игры, которая уже свернута.
+    /// Returns `None` with fewer than two frames, or when the last frame is too old — showing
+    /// nothing beats showing the frame rate of a game that has already been minimised.
     pub fn metrics(&self, now_ns: u64) -> Option<FrameMetrics> {
         if self.times.len() < 2 {
             return None;
@@ -117,8 +119,8 @@ impl FrameTimeline {
 
         let frametime_ms = *frametimes_ms.last()?;
 
-        // Перцентили считаются по frametime, а не по FPS: «1% low» — это медленнейший
-        // процент кадров, и усреднять обратные величины было бы неверно.
+        // Percentiles are taken over frame times, not over FPS: a "1% low" is the slowest one
+        // percent of frames, and averaging reciprocals would be wrong.
         frametimes_ms.sort_unstable_by(f32::total_cmp);
         let low_1pct = percentile_fps(&frametimes_ms, 0.99, MIN_FRAMES_FOR_1PCT);
         let low_01pct = percentile_fps(&frametimes_ms, 0.999, MIN_FRAMES_FOR_01PCT);
@@ -134,10 +136,10 @@ impl FrameTimeline {
     }
 }
 
-/// Берёт `p`-й перцентиль из отсортированных по возрастанию frametime и переводит в FPS.
+/// Takes the `p`th percentile of ascending-sorted frame times and converts it to FPS.
 ///
-/// `min_samples` защищает от бессмысленных цифр: 0.1% low на трёх кадрах — это просто
-/// худший кадр, и показывать его под таким именем нечестно.
+/// `min_samples` guards against meaningless figures: a "0.1% low" over three frames is just
+/// the worst frame, and presenting it under that name would be dishonest.
 fn percentile_fps(sorted_frametimes_ms: &[f32], p: f32, min_samples: usize) -> Option<f32> {
     if sorted_frametimes_ms.len() < min_samples {
         return None;
@@ -153,7 +155,7 @@ mod tests {
 
     const MS: u64 = 1_000_000;
 
-    /// Ровный поток кадров с заданным интервалом.
+    /// A steady stream of frames at a fixed interval.
     fn steady(count: usize, interval_ms: u64) -> FrameTimeline {
         let mut t = FrameTimeline::default();
         for i in 0..count {
@@ -171,13 +173,13 @@ mod tests {
         one.push(1000 * MS);
         assert!(
             one.metrics(1000 * MS).is_none(),
-            "по одному кадру frametime не определён"
+            "a single frame has no frame time"
         );
     }
 
     #[test]
     fn steady_stream_reports_matching_fps() {
-        // 200 кадров по 10 мс = ровно 100 FPS.
+        // 200 frames at 10 ms is exactly 100 FPS.
         let t = steady(200, 10);
         let m = t.metrics(199 * 10 * MS).unwrap();
 
@@ -192,7 +194,7 @@ mod tests {
         let few = steady(50, 10).metrics(49 * 10 * MS).unwrap();
         assert!(
             few.low_1pct.is_none(),
-            "1% low на 50 кадрах — это просто худший кадр"
+            "a 1% low over 50 frames is just the worst frame"
         );
         assert!(few.low_01pct.is_none());
 
@@ -200,14 +202,14 @@ mod tests {
         assert!(some.low_1pct.is_some());
         assert!(
             some.low_01pct.is_none(),
-            "0.1% low требует не меньше 1000 кадров"
+            "a 0.1% low needs at least 1000 frames"
         );
 
         let many = steady(1500, 10).metrics(1499 * 10 * MS).unwrap();
         assert!(many.low_01pct.is_some());
     }
 
-    /// Поток из `count` кадров по 10 мс, где каждый `stutter_every`-й длится 100 мс.
+    /// `count` frames of 10 ms, where every `stutter_every`th one takes 100 ms instead.
     fn with_stutters(count: usize, stutter_every: usize) -> (FrameTimeline, u64) {
         let mut t = FrameTimeline::with_capacity(count + 1);
         let mut now = 0u64;
@@ -224,28 +226,24 @@ mod tests {
 
     #[test]
     fn stutters_drag_down_the_1pct_low_but_barely_touch_the_average() {
-        // 2% кадров тормозят — это уверенно выше порога в 1%.
+        // 2% of frames stutter, comfortably above the 1% threshold.
         let (t, now) = with_stutters(1000, 50);
         let m = t.metrics(now).unwrap();
 
-        assert!(
-            m.avg_fps > 70.0,
-            "средний FPS почти не страдает: {}",
-            m.avg_fps
-        );
+        assert!(m.avg_fps > 70.0, "the mean barely suffers: {}", m.avg_fps);
         let low = m.low_1pct.unwrap();
         assert!(
             low < 20.0,
-            "1% low обязан показать стомиллисекундные кадры, получено {low}"
+            "the 1% low must expose the 100 ms frames, got {low}"
         );
     }
 
-    /// Это не баг, а определение метрики, и его стоит зафиксировать тестом.
+    /// This is the definition of the metric, not a bug, and it is worth pinning down.
     ///
-    /// «1% low» — это 99-й перцентиль frametime. Один фриз на двести кадров составляет
-    /// полпроцента выборки, то есть не дотягивает до порога, и перцентиль его не показывает.
-    /// Чтобы такие одиночные события были видны, в оверлее нужен график frametime — он и
-    /// запланирован отдельно.
+    /// A "1% low" is the 99th percentile frame time. One stutter in two hundred frames is half
+    /// a percent of the sample, below the threshold, so the percentile does not move. Making
+    /// isolated events like that visible is the job of a frame time graph, which is planned
+    /// separately.
     #[test]
     fn a_lone_stutter_below_the_one_percent_threshold_does_not_move_the_1pct_low() {
         let mut t = FrameTimeline::default();
@@ -259,7 +257,7 @@ mod tests {
         let low = m.low_1pct.unwrap();
         assert!(
             (low - 100.0).abs() < 1.0,
-            "99% кадров по-прежнему укладываются в 10 мс: {low}"
+            "99% of frames still fit in 10 ms: {low}"
         );
     }
 
@@ -268,7 +266,7 @@ mod tests {
         let mut t = FrameTimeline::default();
         t.push(100 * MS);
         t.push(110 * MS);
-        t.push(105 * MS); // пришёл с опозданием — игнорируем
+        t.push(105 * MS); // arrived late, ignore it
         t.push(120 * MS);
 
         let m = t.metrics(120 * MS).unwrap();
@@ -283,7 +281,7 @@ mod tests {
         t.push(100 * MS);
         assert!(
             t.metrics(100 * MS).is_none(),
-            "два одинаковых таймстампа — это один кадр"
+            "two identical timestamps describe one frame"
         );
     }
 
@@ -293,11 +291,11 @@ mod tests {
         let last = 199 * 10 * MS;
         assert!(
             t.metrics(last + 500 * MS).is_some(),
-            "полсекунды — ещё живо"
+            "half a second is still live"
         );
         assert!(
             t.metrics(last + 3_000 * MS).is_none(),
-            "через три секунды без кадров показывать старый FPS нельзя"
+            "after three silent seconds the old FPS must not be shown"
         );
     }
 

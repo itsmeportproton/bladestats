@@ -1,61 +1,78 @@
 # bladestats
 
-Лёгкий игровой оверлей-мониторинг для Windows 10/11 и Linux. Аналог MangoHud, задуманный как
-замена RTSS для тех, кому важно не платить за оверлей просадкой FPS.
+A lightweight, free, open-source, portable hardware monitor and FPS overlay for Windows 10/11
+and Linux.
 
-**Статус: в разработке.** Пока собирается только ядро; работающего бинарника ещё нет.
+No installer, no service, no account, no telemetry. A single executable that draws your CPU,
+GPU, memory and frame rate on top of a game and otherwise stays out of the way.
 
-## Чем отличается
+**Status: work in progress.** The overlay window and renderer are working; hardware telemetry
+and FPS are not wired up yet.
 
-**На Windows не делает инжект.** Ни загрузки DLL в игру, ни хуков `Present`, ни чтения чужой
-памяти. FPS берётся из ETW — того же источника, что использует Intel PresentMon. Для анти-чита
-bladestats выглядит как обычное окно плюс системная трассировка.
+## Design constraints
 
-Плата за это — оверлей работает только в режиме «полноэкранный в окне» (borderless). В
-exclusive fullscreen нарисовать поверх чужого swapchain без хука нельзя, поэтому bladestats
-такой режим определяет и прячется.
+These are load-bearing, not preferences. Everything else in the project follows from them.
 
-**На Linux всё иначе.** Аналога ETW там нет, поэтому FPS измеряется Vulkan-слоем
-(`VK_LAYER_bladestats_overlay`) — официальным механизмом Vulkan, тем же, на котором построен
-MangoHud. Это код внутри процесса игры, и честно об этом сказать важнее, чем сделать вид, что
-подход одинаков на обеих ОС.
+**On Windows, nothing is injected into the game.** No DLL is loaded into the target process, no
+`Present` hook is installed, no foreign memory is read. Frame timing comes from ETW, the
+tracing facility built into Windows. To an anti-cheat, bladestats is an ordinary window plus a
+system trace.
 
-## Что показывает
+The cost is that the overlay only works in borderless ("fullscreen windowed") mode. Drawing on
+top of someone else's swapchain in exclusive fullscreen is not possible without a hook, so
+bladestats detects that mode and hides instead.
 
-- FPS, frametime, 1% и 0.1% low — для D3D и Vulkan
-- CPU: загрузка и частота **по каждому ядру**, точное имя из диспетчера устройств
-- GPU: загрузка, VRAM, температура, частоты, ватты, точное имя
-- ОЗУ: занято/всего и частота
-- Потребление в ваттах там, где для него есть настоящий сенсор
+**On Linux the mechanism is different.** There is no equivalent of ETW, so frame timing comes
+from a Vulkan layer (`VK_LAYER_bladestats_overlay`). A Vulkan layer is code running inside the
+game process. That is a real difference from the Windows side, and it is stated here rather
+than glossed over.
 
-### Про ватты — без приукрашивания
+**Overhead is the headline metric.** An overlay that costs frames defeats its own purpose. The
+target is under 1% of one core and under 30 MB resident, and it is checked by measurement, not
+assumed.
+
+## What it shows
+
+- FPS, frame time, 1% and 0.1% lows — for both D3D and Vulkan titles
+- CPU: load and clock **per core**, plus the exact model name
+- GPU: load, VRAM, temperature, clocks, power draw, exact model name
+- Memory: used/total and configured speed
+- Power draw wherever a real sensor exists
+
+### About power readings
 
 | | Windows | Linux |
 |---|---|---|
-| GPU | да (NVML; для AMD/Intel — позже через ADLX/IGCL) | да (hwmon) |
-| CPU | **оценка**, помечена тильдой: `~65 W` | да (RAPL) |
-| ОЗУ | нет | нет |
+| GPU | yes (NVML; AMD/Intel later via ADLX/IGCL) | yes (hwmon) |
+| CPU | **estimate**, always marked with a tilde: `~65 W` | yes (RAPL) |
+| Memory | no | no |
 
-Ватты CPU на Windows читаются только из MSR, а это драйвер уровня ядра. Такой драйвер
-(WinRing0 и родня) есть в блоклисте уязвимых драйверов Microsoft и его флагают анти-читы —
-то есть он рискованнее, чем весь остальной bladestats вместе взятый. Поэтому на Windows
-показывается оценка из загрузки, частот и TDP, и она всегда помечена как приблизительная.
+CPU package power on Windows can only be read from MSRs, which requires a kernel-mode driver.
+Drivers of that kind (WinRing0 and relatives) appear in Microsoft's vulnerable-driver blocklist
+and are flagged by anti-cheats — that single component would carry more risk than the whole of
+the rest of bladestats. So Windows shows a figure derived from load, clocks and TDP, and it is
+always marked as an estimate.
 
-Потребление ОЗУ не показывается вообще: на потребительских платформах у памяти нет сенсора
-мощности. Выдумывать это число мы не будем.
+Memory power is not shown at all. Consumer platforms have no power sensor for RAM, in SPD, in
+SMBIOS or in hwmon. Rather than invent a plausible number, bladestats shows capacity, speed and
+timings and leaves it at that.
 
-## Сборка
+The same principle runs through the whole UI: a metric that could not be read is drawn as a
+dash, never as a zero.
+
+## Building
 
 ```sh
 cargo build --release
 ```
 
-Шрифт в репозитории не хранится — см. [assets/fonts/README.md](assets/fonts/README.md).
+The font file is not stored in the repository — see
+[assets/fonts/README.md](assets/fonts/README.md).
 
-## Лицензия
+## Licence
 
-Код — MIT, см. [LICENSE](LICENSE).
+Code is MIT, see [LICENSE](LICENSE).
 
-Шрифт JetBrains Mono распространяется под SIL Open Font License 1.1 — её текст лежит рядом со
-шрифтом в [assets/fonts/LICENSE-JetBrainsMono.txt](assets/fonts/LICENSE-JetBrainsMono.txt) и
-обязан сопровождать любую сборку, в которую шрифт вшит.
+JetBrains Mono is distributed under the SIL Open Font License 1.1. Its text lives next to the
+font in [assets/fonts/LICENSE-JetBrainsMono.txt](assets/fonts/LICENSE-JetBrainsMono.txt) and
+must accompany any build that embeds it.

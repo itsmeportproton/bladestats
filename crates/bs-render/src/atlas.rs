@@ -1,37 +1,37 @@
-//! Глиф-атлас: шрифт растеризуется один раз на старте в одну текстуру покрытия.
+//! Glyph atlas: the font is rasterised once at startup into a single coverage texture.
 //!
-//! Так и Windows, и Linux рисуют текст одинаково — платформа получает готовые вершины и не
-//! знает ни про DirectWrite, ни про какой-либо текстовый движок вообще. Плата за это —
-//! отсутствие хинтинга и субпиксельного сглаживания; для оверлея с моноширинными цифрами
-//! это приемлемо, а вот расхождение вида между ОС было бы не приемлемо.
+//! This is what lets Windows and Linux draw text identically — the platform receives finished
+//! vertices and knows nothing about DirectWrite or any text engine at all. The price is no
+//! hinting and no subpixel antialiasing; for an overlay of monospaced digits that is a fine
+//! trade, whereas the two platforms looking different would not be.
 
 use std::collections::HashMap;
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
 
-/// Отступ между глифами в атласе, чтобы билинейная фильтрация не тянула соседей.
+/// Gap between glyphs in the atlas, so filtering cannot bleed neighbours into each other.
 const PADDING: u32 = 1;
 
-/// Ширина атласа. Высота подбирается под содержимое.
+/// Atlas width. Height is chosen to fit the content.
 const ATLAS_WIDTH: u32 = 512;
 
-/// Непрозрачный квадрат в левом верхнем углу атласа.
+/// An opaque square in the top-left corner of the atlas.
 ///
-/// Нужен, чтобы сплошные прямоугольники (подложка, мини-бары загрузки) рисовались тем же
-/// шейдером и тем же вызовом отрисовки, что и текст, — иначе пришлось бы держать вторую
-/// пайплайн-ветку ради заливки цветом.
+/// It lets solid rectangles (the backing panel, per-core load bars) go through the same shader
+/// and the same draw call as text — otherwise a second pipeline would be needed purely to fill
+/// with colour.
 const WHITE_TEXEL_SIZE: u32 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Glyph {
-    /// Координаты в атласе, 0.0..=1.0.
+    /// Position in the atlas, 0.0..=1.0.
     pub uv_min: [f32; 2],
     pub uv_max: [f32; 2],
-    /// Размер отрисованного пятна в пикселях.
+    /// Size of the inked area, in pixels.
     pub size_px: [f32; 2],
-    /// Смещение от точки пера (на базовой линии) до левого верхнего угла пятна.
+    /// Offset from the pen position (on the baseline) to the top-left of the inked area.
     pub offset_px: [f32; 2],
-    /// На сколько сдвинуть перо после этого символа.
+    /// How far to advance the pen after this character.
     pub advance_px: f32,
 }
 
@@ -39,31 +39,31 @@ pub struct Glyph {
 pub struct GlyphAtlas {
     pub width: u32,
     pub height: u32,
-    /// Покрытие, один байт на тексель. Цвет задаётся в вершинах, а не в текстуре.
+    /// Coverage, one byte per texel. Colour comes from the vertices, not from the texture.
     pub pixels: Vec<u8>,
     glyphs: HashMap<char, Glyph>,
-    /// UV непрозрачного текселя для сплошных заливок.
+    /// UV of the opaque texel, for solid fills.
     white_uv: [f32; 2],
     pub line_height: f32,
     pub ascent: f32,
-    /// Ширина символа. Шрифт моноширинный, так что она одна на всех.
+    /// Character cell width. The font is monospaced, so one value covers every glyph.
     pub advance: f32,
 }
 
 #[derive(Debug)]
 pub enum AtlasError {
-    /// Файл шрифта не разобрался.
+    /// The font file could not be parsed.
     InvalidFont,
-    /// В шрифте не нашлось ни одного глифа из запрошенного набора.
+    /// The font contained none of the requested characters.
     EmptyCharset,
 }
 
 impl std::fmt::Display for AtlasError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AtlasError::InvalidFont => f.write_str("не удалось разобрать файл шрифта"),
+            AtlasError::InvalidFont => f.write_str("could not parse the font file"),
             AtlasError::EmptyCharset => {
-                f.write_str("в шрифте нет ни одного глифа из запрошенного набора")
+                f.write_str("the font contains none of the requested characters")
             }
         }
     }
@@ -71,15 +71,16 @@ impl std::fmt::Display for AtlasError {
 
 impl std::error::Error for AtlasError {}
 
-/// Набор символов по умолчанию: печатная латиница, кириллица и знак градуса для температур.
+/// Default character set: printable ASCII plus the few symbols the HUD uses.
+///
+/// Deliberately small — the UI is English and hardware model strings are Latin. Adding another
+/// script later is one `chain` call away.
 pub fn default_charset() -> impl Iterator<Item = char> {
-    (' '..='~')
-        .chain('А'..='я')
-        .chain(['Ё', 'ё', '°', '—', '·'])
+    (' '..='~').chain(['°', '—', '·'])
 }
 
 impl GlyphAtlas {
-    /// Растеризует шрифт в атлас на кегле `px`.
+    /// Rasterises the font into an atlas at `px` size.
     pub fn new(font_bytes: &[u8], px: f32) -> Result<Self, AtlasError> {
         Self::with_charset(font_bytes, px, default_charset())
     }
@@ -94,11 +95,11 @@ impl GlyphAtlas {
 
         let line_height = scaled.ascent() - scaled.descent() + scaled.line_gap();
         let ascent = scaled.ascent();
-        // Шрифт моноширинный, поэтому ширина ячейки берётся с любого видимого символа.
+        // The font is monospaced, so the cell width can be read off any visible character.
         let advance = scaled.h_advance(font.glyph_id('0'));
 
-        // Сначала растеризуем всё, потом раскладываем: пока не известны размеры пятен,
-        // упаковывать нечего.
+        // Rasterise everything first, pack afterwards: until the inked sizes are known there
+        // is nothing to pack.
         let mut rasterized: Vec<Rasterized> = Vec::new();
         let mut seen = HashMap::new();
         for ch in charset {
@@ -110,7 +111,7 @@ impl GlyphAtlas {
             let outlined = font.outline_glyph(id.with_scale_and_position(px, point(0.0, 0.0)));
 
             let Some(outlined) = outlined else {
-                // Пробел и прочие невидимые символы: глифа нет, но перо двигать надо.
+                // Space and other invisible characters: no ink, but the pen still moves.
                 rasterized.push(Rasterized {
                     ch,
                     coverage: Vec::new(),
@@ -149,10 +150,10 @@ impl GlyphAtlas {
         Self::pack(rasterized, line_height, ascent, advance)
     }
 
-    /// Полочная упаковка: глифы сортируются по высоте и укладываются рядами.
+    /// Shelf packing: glyphs are sorted by height and laid out in rows.
     ///
-    /// Для нескольких сотен глифов одного кегля этого более чем достаточно — атлас строится
-    /// один раз на старте, и выигрывать проценты площади незачем.
+    /// For a couple of hundred glyphs at a single size this is more than enough — the atlas is
+    /// built once at startup, and squeezing out a few percent of area would buy nothing.
     fn pack(
         mut glyphs: Vec<Rasterized>,
         line_height: f32,
@@ -161,7 +162,7 @@ impl GlyphAtlas {
     ) -> Result<Self, AtlasError> {
         glyphs.sort_unstable_by(|a, b| b.h.cmp(&a.h).then(a.ch.cmp(&b.ch)));
 
-        // Первый ряд занят белым текселем для сплошных заливок.
+        // The first row starts after the opaque texel reserved for solid fills.
         let mut pen_x = WHITE_TEXEL_SIZE + PADDING;
         let mut pen_y = 0u32;
         let mut row_height = WHITE_TEXEL_SIZE;
@@ -214,7 +215,7 @@ impl GlyphAtlas {
             );
         }
 
-        // Невидимые символы попадают в карту без пятна, но со своим шагом пера.
+        // Invisible characters land in the map with no ink but with their own advance.
         for g in &glyphs {
             map.entry(g.ch).or_insert(Glyph {
                 uv_min: [0.0, 0.0],
@@ -242,12 +243,12 @@ impl GlyphAtlas {
         self.glyphs.get(&ch)
     }
 
-    /// UV непрозрачного текселя — для квадов сплошного цвета.
+    /// UV of the opaque texel — for solid-colour quads.
     pub fn white_uv(&self) -> [f32; 2] {
         self.white_uv
     }
 
-    /// Ширина строки в пикселях без её отрисовки.
+    /// Width of a string in pixels, without drawing it.
     pub fn measure(&self, text: &str) -> f32 {
         text.chars()
             .map(|c| self.glyph(c).map_or(self.advance, |g| g.advance_px))
@@ -268,8 +269,8 @@ struct Rasterized {
 mod tests {
     use super::*;
 
-    /// Шрифт не хранится в репозитории, поэтому тесты, которым он нужен, пропускаются,
-    /// если его не скачали. См. assets/fonts/README.md.
+    /// The font is not stored in the repository, so tests that need it skip when it is
+    /// missing. See assets/fonts/README.md.
     fn font() -> Option<Vec<u8>> {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -281,9 +282,9 @@ mod tests {
     macro_rules! atlas_or_skip {
         ($px:expr) => {
             match font() {
-                Some(bytes) => GlyphAtlas::new(&bytes, $px).expect("атлас должен собраться"),
+                Some(bytes) => GlyphAtlas::new(&bytes, $px).expect("the atlas should build"),
                 None => {
-                    eprintln!("пропуск: assets/fonts/JetBrainsMono-Regular.ttf не найден");
+                    eprintln!("skipped: assets/fonts/JetBrainsMono-Regular.ttf not found");
                     return;
                 }
             }
@@ -297,14 +298,10 @@ mod tests {
     }
 
     #[test]
-    fn covers_digits_latin_and_cyrillic() {
+    fn covers_everything_the_hud_draws() {
         let atlas = atlas_or_skip!(16.0);
-        for ch in "0123456789ABCXYZ%°".chars() {
-            assert!(atlas.glyph(ch).is_some(), "нет глифа для {ch:?}");
-        }
-        // Интерфейс и сообщения на русском, поэтому кириллица обязана быть в атласе.
-        for ch in "ЦПГрадусов".chars() {
-            assert!(atlas.glyph(ch).is_some(), "нет глифа для {ch:?}");
+        for ch in "0123456789ABCXYZ%°~/.—".chars() {
+            assert!(atlas.glyph(ch).is_some(), "no glyph for {ch:?}");
         }
     }
 
@@ -317,28 +314,28 @@ mod tests {
             .collect();
         let first = widths[0];
         for w in &widths {
-            assert!((w - first).abs() < 1e-3, "цифры разной ширины: {widths:?}");
+            assert!(
+                (w - first).abs() < 1e-3,
+                "digits differ in width: {widths:?}"
+            );
         }
-        // Это главная причина выбора моноширинного шрифта: смена 99 на 100 не должна
-        // дёргать всю строку.
+        // This is the whole reason for choosing a monospaced font: 99 becoming 100 must not
+        // shove the rest of the line sideways.
         assert!((atlas.measure("100") - atlas.measure("999")).abs() < 1e-3);
     }
 
     #[test]
     fn space_has_advance_but_no_ink() {
         let atlas = atlas_or_skip!(16.0);
-        let space = atlas.glyph(' ').expect("пробел должен быть в атласе");
-        assert!(space.advance_px > 0.0, "пробел обязан двигать перо");
-        assert_eq!(space.size_px, [0.0, 0.0], "у пробела нет пятна");
+        let space = atlas.glyph(' ').expect("space should be in the atlas");
+        assert!(space.advance_px > 0.0, "a space must move the pen");
+        assert_eq!(space.size_px, [0.0, 0.0], "a space has no ink");
     }
 
     #[test]
     fn atlas_has_an_opaque_texel_for_solid_fills() {
         let atlas = atlas_or_skip!(16.0);
-        assert_eq!(
-            atlas.pixels[0], 0xFF,
-            "левый верхний тексель должен быть непрозрачным"
-        );
+        assert_eq!(atlas.pixels[0], 0xFF, "the top-left texel must be opaque");
 
         let [u, v] = atlas.white_uv();
         let x = (u * atlas.width as f32) as usize;
@@ -346,7 +343,7 @@ mod tests {
         assert_eq!(
             atlas.pixels[y * atlas.width as usize + x],
             0xFF,
-            "white_uv обязан указывать внутрь непрозрачного пятна"
+            "white_uv must point inside the opaque patch"
         );
     }
 
@@ -358,7 +355,7 @@ mod tests {
             let Some(g) = atlas.glyph(ch) else { continue };
             assert!(
                 g.uv_max[0] <= 1.0 && g.uv_max[1] <= 1.0,
-                "глиф {ch:?} вылез за атлас"
+                "glyph {ch:?} spills out of the atlas"
             );
             assert!(g.uv_min[0] >= 0.0 && g.uv_min[1] >= 0.0);
         }
@@ -389,7 +386,7 @@ mod tests {
     #[test]
     fn unknown_characters_fall_back_to_one_cell_instead_of_vanishing() {
         let atlas = atlas_or_skip!(16.0);
-        // Иероглифа в наборе нет; ширина должна деградировать до ячейки, а не до нуля.
+        // Not in the charset: the width must degrade to one cell, not to zero.
         assert!((atlas.measure("漢") - atlas.advance).abs() < 1e-3);
     }
 }

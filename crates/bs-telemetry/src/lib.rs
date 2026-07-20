@@ -1,7 +1,7 @@
-//! Сбор телеметрии железа.
+//! Hardware telemetry collection.
 //!
-//! Каждый бэкенд рапортует только то, что реально умеет прочитать, остальные поля оставляет
-//! `None`. Агрегатор склеивает их по убыванию богатства данных: вендорский SDK перекрывает
-//! универсальный источник, недостающее добирается снизу.
+//! Each backend reports only what it can genuinely read and leaves the rest as `None`. The
+//! aggregator merges them richest-first: a vendor SDK overrides the generic source, and
+//! whatever it cannot supply is filled in from below.
 //!
-//! Наполняется на этапе 3.
+//! Populated in stage 3.

@@ -5,19 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Глиф-атлас и раскладка оверлея, общие для Windows и Linux"
+description = "Glyph atlas and overlay layout, shared between Windows and Linux"
 
 [dependencies]
 bs-core.workspace = true
 ab_glyph.workspace = true
 
 [dev-dependencies]
-# Только для примера preview: он софтверно растеризует список отрисовки в PNG, чтобы
-# раскладку можно было проверить глазами, не поднимая D3D11 или Vulkan.
+# Only for the `preview` example, which software-rasterises the draw list to a PNG so the
+# layout can be checked by eye without bringing up D3D11 or Vulkan.
 png = "0.18"
 
 [features]
-# Вшивает JetBrains Mono прямо в бинарник, чтобы оверлей не зависел от файлов рядом с exe.
-# Требует наличия assets/fonts/JetBrainsMono-Regular.ttf — см. README там же.
+# Embeds JetBrains Mono in the binary, so the overlay does not depend on files next to the
+# executable. Requires assets/fonts/JetBrainsMono-Regular.ttf — see the README there.
 default = ["embedded-font"]
 embedded-font = []

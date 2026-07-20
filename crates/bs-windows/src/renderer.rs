@@ -1,11 +1,11 @@
-//! Рендер оверлея: D3D11 поверх swapchain композиции, содержимое — из `bs-render`.
+//! Overlay rendering: D3D11 into a composition swapchain, content supplied by `bs-render`.
 //!
-//! Путь картинки: D3D11-устройство → swapchain, созданный под композицию (premultiplied
-//! alpha) → визуал DirectComposition, привязанный к окну. Никакого `UpdateLayeredWindow`,
-//! никакой пересылки битмапа через CPU — альфа считается на видеокарте.
+//! The image path is: D3D11 device → a swapchain created for composition (premultiplied
+//! alpha) → a DirectComposition visual bound to the window. No `UpdateLayeredWindow`, no
+//! bitmap shuttled through the CPU — alpha is resolved on the GPU.
 //!
-//! Шейдер один и тот же для текста и для заливок: сплошные прямоугольники берут
-//! непрозрачный тексель атласа, поэтому весь оверлей рисуется одним вызовом.
+//! One shader serves both text and fills: solid rectangles sample the atlas's opaque texel, so
+//! the entire overlay goes out in a single draw call.
 
 use std::ffi::c_void;
 
@@ -24,11 +24,11 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::core::{Interface, PCSTR, s};
 
-/// Исходник шейдера. Держим здесь, а не в отдельном файле: он короткий, и рядом с кодом,
-/// который заводит буферы, его проще держать согласованным.
+/// Shader source. Kept here rather than in a separate file: it is short, and sitting next to
+/// the code that sets up the buffers makes the two easier to keep in agreement.
 const SHADER: &str = r#"
 cbuffer Params : register(b0) {
-    float2 inv_viewport;   // 1 / (ширина, высота) в пикселях
+    float2 inv_viewport;   // 1 / (width, height) in pixels
     float2 _padding;
 };
 
@@ -37,7 +37,7 @@ struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 col : COL
 
 VSOut vs_main(VSIn i) {
     VSOut o;
-    // Пиксели с началом в левом верхнем углу переводятся в NDC.
+    // Pixels with the origin at the top-left, converted to NDC.
     o.pos = float4(i.pos.x * inv_viewport.x * 2.0 - 1.0,
                    1.0 - i.pos.y * inv_viewport.y * 2.0, 0.0, 1.0);
     o.uv = i.uv;
@@ -49,8 +49,8 @@ Texture2D<float> atlas : register(t0);
 SamplerState atlas_sampler : register(s0);
 
 float4 ps_main(VSOut i) : SV_TARGET {
-    // В атласе лежит только покрытие; цвет приходит из вершины уже premultiplied,
-    // поэтому домножение всей четвёрки сохраняет premultiplied-инвариант.
+    // The atlas holds coverage only; the vertex colour arrives already premultiplied, so
+    // scaling all four components preserves the premultiplied invariant.
     return i.col * atlas.Sample(atlas_sampler, i.uv);
 }
 "#;
@@ -67,7 +67,8 @@ pub struct Renderer {
     swapchain: IDXGISwapChain1,
     rtv: Option<ID3D11RenderTargetView>,
 
-    // Композиция должна пережить рендерер: пока эти объекты живы, картинка на экране.
+    // The composition tree must outlive nothing less than the renderer itself: while these
+    // objects are alive, the image is on screen.
     _dcomp_device: IDCompositionDevice,
     _dcomp_target: IDCompositionTarget,
     _dcomp_visual: IDCompositionVisual,
@@ -99,7 +100,7 @@ impl Renderer {
                 None,
                 D3D_DRIVER_TYPE_HARDWARE,
                 HMODULE::default(),
-                // BGRA_SUPPORT нужен для взаимодействия с композицией.
+                // BGRA_SUPPORT is required for interop with composition.
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 Some(&[D3D_FEATURE_LEVEL_11_0]),
                 D3D11_SDK_VERSION,
@@ -108,8 +109,8 @@ impl Renderer {
                 Some(&mut context),
             )
             .context("D3D11CreateDevice")?;
-            let device = device.ok_or_else(|| anyhow!("D3D11 не вернул устройство"))?;
-            let context = context.ok_or_else(|| anyhow!("D3D11 не вернул контекст"))?;
+            let device = device.ok_or_else(|| anyhow!("D3D11 returned no device"))?;
+            let context = context.ok_or_else(|| anyhow!("D3D11 returned no context"))?;
 
             let dxgi_device: IDXGIDevice = device.cast()?;
             let adapter = dxgi_device.GetAdapter().context("GetAdapter")?;
@@ -128,7 +129,7 @@ impl Renderer {
                         },
                         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                         BufferCount: 2,
-                        // Композиция требует flip-модели и premultiplied-альфы.
+                        // Composition requires the flip model and premultiplied alpha.
                         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                         AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
                         ..Default::default()
@@ -137,7 +138,8 @@ impl Renderer {
                 )
                 .context("CreateSwapChainForComposition")?;
 
-            // Дерево композиции: устройство → цель, привязанная к окну → визуал с swapchain.
+            // The composition tree: device → a target bound to the window → a visual holding
+            // the swapchain.
             let dcomp_device: IDCompositionDevice =
                 DCompositionCreateDevice(&dxgi_device).context("DCompositionCreateDevice")?;
 
@@ -196,7 +198,8 @@ impl Renderer {
             return Ok(());
         }
         unsafe {
-            // Все ссылки на буферы swapchain должны быть отпущены до ResizeBuffers.
+            // Every reference to the swapchain's buffers must be released before
+            // ResizeBuffers.
             self.rtv = None;
             self.context.OMSetRenderTargets(None, None);
             self.swapchain
@@ -226,15 +229,16 @@ impl Renderer {
         Ok(())
     }
 
-    /// Рисует список отрисовки и показывает кадр.
+    /// Draws the list and presents the frame.
     pub fn render(&mut self, list: &DrawList) -> Result<()> {
         unsafe {
             let rtv = self
                 .rtv
                 .clone()
-                .ok_or_else(|| anyhow!("нет цели отрисовки"))?;
+                .ok_or_else(|| anyhow!("no render target"))?;
 
-            // Прозрачная очистка: всё, что мы не нарисовали, показывает игру под нами.
+            // Clearing to transparent: wherever nothing is drawn, the game underneath shows
+            // through.
             self.context
                 .ClearRenderTargetView(&rtv, &[0.0, 0.0, 0.0, 0.0]);
             self.context.OMSetRenderTargets(Some(&[Some(rtv)]), None);
@@ -294,13 +298,15 @@ impl Renderer {
 
             self.context.DrawIndexed(list.indices.len() as u32, 0, 0);
 
-            // Интервал 1: оверлею незачем обгонять развёртку, а лишние кадры это лишние ватты.
+            // Interval 1: the overlay has no reason to outrun the display, and extra frames
+            // are just extra watts.
             self.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
         Ok(())
     }
 
-    /// Заливает вершины и индексы, при нехватке места пересоздавая буферы с запасом.
+    /// Uploads vertices and indices, reallocating the buffers with headroom when they no
+    /// longer fit.
     fn upload_geometry(&mut self, list: &DrawList) -> Result<()> {
         unsafe {
             if self.vertex_capacity < list.vertices.len() {
@@ -364,7 +370,7 @@ fn compile(
         );
 
         if result.is_err() {
-            // Сообщение компилятора куда полезнее HRESULT, поэтому вытаскиваем его.
+            // The compiler's own message is far more useful than an HRESULT, so dig it out.
             let message = errors
                 .as_ref()
                 .map(|e| {
@@ -374,10 +380,10 @@ fn compile(
                     );
                     String::from_utf8_lossy(bytes).into_owned()
                 })
-                .unwrap_or_else(|| "компилятор шейдеров не объяснил причину".into());
-            return Err(anyhow!("не скомпилировался шейдер: {message}"));
+                .unwrap_or_else(|| "the shader compiler gave no reason".into());
+            return Err(anyhow!("shader failed to compile: {message}"));
         }
-        code.ok_or_else(|| anyhow!("компилятор шейдеров не вернул код"))
+        code.ok_or_else(|| anyhow!("the shader compiler returned no bytecode"))
     }
 }
 
@@ -452,8 +458,8 @@ fn create_input_layout(
     }
 }
 
-/// Смешивание для premultiplied alpha: цвет уже умножен на альфу, поэтому источник берётся
-/// как есть, а приёмник гасится на `1 - alpha`.
+/// Blending for premultiplied alpha: the colour is already scaled by alpha, so the source is
+/// taken as-is and the destination is attenuated by `1 - alpha`.
 fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     unsafe {
         let mut desc = D3D11_BLEND_DESC::default();
@@ -475,8 +481,8 @@ fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     }
 }
 
-/// Точечная фильтрация: атлас растеризован ровно под нужный кегль и никогда не масштабируется,
-/// а билинейная выборка только размыла бы и без того мелкий текст.
+/// Point filtering: the atlas is rasterised at exactly the size it is drawn at and never
+/// scaled, so bilinear sampling would only blur already-small text.
 fn create_sampler(device: &ID3D11Device) -> Result<ID3D11SamplerState> {
     unsafe {
         let desc = D3D11_SAMPLER_DESC {
@@ -532,8 +538,8 @@ fn create_dynamic_buffer(
     }
 }
 
-/// Заливает атлас в неизменяемую текстуру R8: в ней лежит только покрытие, цвет берётся
-/// из вершин, поэтому одного канала достаточно.
+/// Uploads the atlas into an immutable R8 texture: it holds coverage only, and colour comes
+/// from the vertices, so a single channel suffices.
 fn upload_atlas(
     device: &ID3D11Device,
     atlas: &GlyphAtlas,

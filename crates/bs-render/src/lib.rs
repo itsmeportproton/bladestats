@@ -1,10 +1,9 @@
-//! Общий рендер оверлея: растеризация шрифта в глиф-атлас и превращение снапшота в
-//! список текстурированных квадов.
+//! Shared overlay rendering: font rasterisation into a glyph atlas, and turning a snapshot
+//! into a list of textured quads.
 //!
-//! Платформа получает готовые вершины и только заливает их в свой графический API — D3D11
-//! на Windows, Vulkan на Linux. Благодаря этому обе ОС рисуют оверлей пиксель в пиксель
-//! одинаково, чего не вышло бы при использовании DirectWrite на одной стороне и Vulkan-текста
-//! на другой.
+//! The platform receives finished vertices and only uploads them to its own graphics API —
+//! D3D11 on Windows, Vulkan on Linux. That is what makes the overlay pixel-identical on both,
+//! which would not happen with DirectWrite on one side and Vulkan text on the other.
 
 pub mod atlas;
 pub mod draw;
@@ -14,9 +13,9 @@ pub use atlas::{AtlasError, Glyph, GlyphAtlas, default_charset};
 pub use draw::{DrawList, Vertex};
 pub use hud::{HudOptions, HudSize};
 
-/// Шрифт оверлея, вшитый в бинарник.
+/// The overlay font, embedded in the binary.
 ///
-/// Файл не хранится в репозитории (см. `assets/fonts/README.md`), поэтому сборка без него
-/// падает с внятным сообщением, а не с невнятной ошибкой ввода-вывода из `include_bytes!`.
+/// The file is not stored in the repository (see `assets/fonts/README.md`), so a build without
+/// it fails at `include_bytes!` rather than at runtime.
 #[cfg(feature = "embedded-font")]
 pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");

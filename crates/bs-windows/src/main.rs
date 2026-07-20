@@ -1,11 +1,8 @@
-//! bladestats под Windows.
+//! bladestats on Windows.
 //!
-//! Оверлей живёт в собственном окне поверх игры и **не делает инжект**: он не грузит в игру
-//! ничего, не хукает `Present` и не читает чужую память. Отсюда же его ограничение — работа
-//! только в режиме «полноэкранный в окне».
-
-// Консольное окно не нужно, но при запуске с `--demo` или при ошибке хочется видеть вывод,
-// поэтому подсистема остаётся консольной до появления конфига и логов в файл.
+//! The overlay lives in its own window on top of the game and **injects nothing**: it loads no
+//! code into the game, hooks no `Present`, reads no foreign memory. That is also where its one
+//! limitation comes from — it only works in borderless ("fullscreen windowed") mode.
 
 mod renderer;
 mod window;
@@ -17,7 +14,6 @@ use bs_core::{
     CoreMetrics, FrameMetrics, GpuMetrics, MetricsSnapshot, Power, SnapshotHub, Theme, Vendor,
 };
 use bs_render::{GlyphAtlas, HudOptions, hud};
-use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage, WM_QUIT,
 };
@@ -25,15 +21,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::renderer::Renderer;
 use crate::window::OverlayWindow;
 
-/// Кегль шрифта оверлея. Станет настройкой на этапе конфига.
+/// Overlay font size. Becomes a setting once the config lands.
 const FONT_PX: f32 = 16.0;
 
-/// Как часто перерисовываем. 10 Гц: цифры на экране всё равно не читаются быстрее,
-/// а каждый лишний кадр оверлея — это отнятое у игры время.
+/// Redraw rate. 10 Hz: numbers on screen cannot be read faster than that anyway, and every
+/// extra overlay frame is time taken from the game.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Как часто возвращаем окно наверх. Игра перебивает порядок окон при активации,
-/// и без этого оверлей со временем уезжает под неё.
+/// How often the window is pushed back on top. Games reorder the window stack when they
+/// activate, and without this the overlay eventually ends up underneath.
 const TOPMOST_INTERVAL: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
@@ -46,11 +42,11 @@ fn main() -> Result<()> {
 
     let demo = std::env::args().any(|a| a == "--demo");
     if demo {
-        tracing::info!("режим демонстрации: показываются выдуманные метрики");
+        tracing::info!("demo mode: the metrics shown are fabricated");
     }
 
     let atlas = GlyphAtlas::new(bs_render::EMBEDDED_FONT, FONT_PX)
-        .map_err(|e| anyhow::anyhow!("не собрался глиф-атлас: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("could not build the glyph atlas: {e}"))?;
     let theme = Theme::default();
     let opts = HudOptions::default();
     let hub = SnapshotHub::new();
@@ -58,7 +54,8 @@ fn main() -> Result<()> {
         hub.store(demo_snapshot());
     }
 
-    // Размер окна задаётся раскладкой, а не наоборот: HUD знает, сколько ему нужно.
+    // The layout drives the window size, not the other way round: the HUD knows how much room
+    // it needs.
     let (_, size) = hud::build(&atlas, &hub.load(), &theme, &opts);
     let overlay = OverlayWindow::new(32, 32, size.width.ceil() as i32, size.height.ceil() as i32)?;
     let mut renderer = Renderer::new(
@@ -71,14 +68,14 @@ fn main() -> Result<()> {
     tracing::info!(
         width = size.width,
         height = size.height,
-        "оверлей запущен; закрыть — Ctrl+C в этом окне"
+        "overlay running; press Ctrl+C in this console to stop it"
     );
 
     let mut last_draw = Instant::now() - REDRAW_INTERVAL;
     let mut last_topmost = Instant::now();
 
     loop {
-        if pump_messages(overlay.hwnd) {
+        if pump_messages() {
             break;
         }
 
@@ -101,16 +98,16 @@ fn main() -> Result<()> {
             renderer.render(&list)?;
         }
 
-        // Между перерисовками процессу делать нечего: спим до следующего тика вместо
-        // холостого опроса очереди сообщений.
+        // There is nothing to do between redraws, so sleep instead of spinning on the message
+        // queue.
         std::thread::sleep(Duration::from_millis(5));
     }
 
     Ok(())
 }
 
-/// Разбирает накопившиеся сообщения. Возвращает `true`, если пора выходить.
-fn pump_messages(_hwnd: HWND) -> bool {
+/// Drains pending messages. Returns `true` when it is time to quit.
+fn pump_messages() -> bool {
     unsafe {
         let mut msg = MSG::default();
         while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
@@ -124,7 +121,7 @@ fn pump_messages(_hwnd: HWND) -> bool {
     false
 }
 
-/// Выдуманные метрики для проверки внешнего вида, пока телеметрии ещё нет.
+/// Fabricated metrics for checking the overlay's appearance while telemetry does not exist yet.
 fn demo_snapshot() -> MetricsSnapshot {
     let mut s = MetricsSnapshot::default();
     s.cpu.name = Some("AMD Ryzen 7 7800X3D 8-Core Processor".into());

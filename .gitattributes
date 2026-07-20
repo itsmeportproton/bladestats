@@ -1,5 +1,5 @@
-# Проект собирается и на Linux, поэтому в репозитории всегда LF независимо от того,
-# с какой машины сделан коммит. Шелл-скрипты и манифесты Vulkan-слоя на CRLF ломаются.
+# The project also builds on Linux, so the repository always stores LF regardless of which
+# machine a commit came from. Shell scripts and Vulkan layer manifests break on CRLF.
 * text=auto eol=lf
 
 *.ttf binary

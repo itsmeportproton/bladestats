@@ -1,9 +1,9 @@
-//! Обмен снапшотом между потоками.
+//! Sharing the snapshot between threads.
 //!
-//! Потоков три: сэмплер телеметрии (медленный, ~500 мс), источник кадров (быстрый, колбэк ETW
-//! или Vulkan-слоя) и рендер (10–20 Гц). Рендер не должен ждать никого, поэтому обмен идёт
-//! через [`arc_swap`], а не через мьютекс: читатель забирает указатель, писатель публикует
-//! новый снапшот целиком.
+//! There are three writers and readers: the telemetry sampler (slow, ~500 ms), the frame source
+//! (fast, an ETW or Vulkan layer callback) and the renderer (10–20 Hz). The renderer must never
+//! wait on anyone, so the handoff goes through [`arc_swap`] rather than a mutex: readers grab a
+//! pointer, writers publish a whole new snapshot.
 
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use arc_swap::ArcSwap;
 
 use crate::snapshot::MetricsSnapshot;
 
-/// Точка обмена снапшотом. Клонируется в каждый поток.
+/// The shared snapshot slot. Cloned into each thread.
 #[derive(Clone)]
 pub struct SnapshotHub {
     inner: Arc<ArcSwap<MetricsSnapshot>>,
@@ -30,22 +30,22 @@ impl SnapshotHub {
         }
     }
 
-    /// Забирает текущий снапшот. Не блокируется и не ждёт писателя.
+    /// Takes the current snapshot. Never blocks, never waits for a writer.
     pub fn load(&self) -> Arc<MetricsSnapshot> {
         self.inner.load_full()
     }
 
-    /// Публикует новый снапшот, заменяя предыдущий целиком.
+    /// Publishes a new snapshot, replacing the previous one wholesale.
     pub fn store(&self, snapshot: MetricsSnapshot) {
         self.inner.store(Arc::new(snapshot));
     }
 
-    /// Правит текущий снапшот и публикует результат.
+    /// Edits the current snapshot and publishes the result.
     ///
-    /// Обновления от разных источников независимы (телеметрия отдельно, кадры отдельно),
-    /// поэтому здесь возможна гонка «потерянное обновление»: два писателя, прочитавшие один
-    /// и тот же снапшот, затрут правки друг друга. Для оверлея это приемлемо — цена промаха
-    /// в один тик отрисовки, а не испорченные данные.
+    /// Updates from different sources are independent (telemetry separately, frames
+    /// separately), so a lost-update race is possible here: two writers that read the same
+    /// snapshot will overwrite each other's edits. For an overlay that is acceptable — the
+    /// cost of a miss is one dropped tick of a value, not corrupted data.
     pub fn update(&self, f: impl FnOnce(&mut MetricsSnapshot)) {
         let mut next = (*self.load()).clone();
         f(&mut next);
@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(
             held.memory.speed_mhz,
             Some(3200),
-            "снапшот у читателя неизменяем"
+            "a snapshot handed to a reader is immutable"
         );
         assert_eq!(hub.load().memory.speed_mhz, Some(6000));
     }

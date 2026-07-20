@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Сбор телеметрии железа: трейты сэмплеров и бэкенды под Windows и Linux"
+description = "Hardware telemetry: sampler traits and the Windows and Linux backends"
 
 [dependencies]
 bs-core.workspace = true
@@ -14,8 +14,8 @@ tracing.workspace = true
 
 [features]
 default = []
-# NVIDIA-бэкенд. nvml.dll всё равно грузится динамически, так что сборка с этой фичей
-# работает и на машинах без NVIDIA — бэкенд просто не зарегистрируется.
+# NVIDIA backend. nvml.dll is loaded dynamically regardless, so a build with this feature
+# still runs on machines without NVIDIA hardware — the backend simply does not register.
 nvidia = ["dep:nvml-wrapper"]
 
 [dependencies.nvml-wrapper]

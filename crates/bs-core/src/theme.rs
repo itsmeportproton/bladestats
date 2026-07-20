@@ -1,15 +1,15 @@
-//! Цвета оверлея.
+//! Overlay colours.
 //!
-//! Оверлей рисуется поверх произвольной картинки, поэтому альфа здесь — не украшение, а
-//! рабочий параметр: и текст, и подложка настраиваются пользователем.
+//! The overlay is drawn on top of arbitrary imagery, so alpha here is a working parameter
+//! rather than decoration: both text and backing are user-configurable.
 
 use serde::{Deserialize, Serialize};
 
-/// Цвет с альфой, ненумноженной на цветовые каналы (straight alpha).
+/// A colour with straight (non-premultiplied) alpha.
 ///
-/// Умножение на альфу делается на границе с графическим API — и D3D11-swapchain
-/// DirectComposition, и Vulkan-блендинг ждут premultiplied, но хранить и настраивать удобнее
-/// прямой вид.
+/// Premultiplication happens at the boundary with the graphics API — both a D3D11 composition
+/// swapchain and Vulkan blending expect premultiplied values — but straight alpha is easier to
+/// store and to configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub struct Color {
@@ -31,7 +31,7 @@ impl Color {
         Self { r, g, b, a }
     }
 
-    /// Линейные компоненты с premultiplied alpha — в таком виде цвет уезжает в шейдер.
+    /// Components with premultiplied alpha — the form the shader receives.
     pub fn to_premultiplied_f32(self) -> [f32; 4] {
         let a = self.a as f32 / 255.0;
         [
@@ -42,7 +42,7 @@ impl Color {
         ]
     }
 
-    /// Разбирает `#RGB`, `#RRGGBB` или `#RRGGBBAA`; решётка необязательна.
+    /// Parses `#RGB`, `#RRGGBB` or `#RRGGBBAA`; the hash is optional.
     pub fn parse(s: &str) -> Option<Self> {
         let h = s.trim().trim_start_matches('#');
         let nyb = |i: usize| u8::from_str_radix(&h[i..i + 1], 16).ok();
@@ -57,8 +57,8 @@ impl Color {
 }
 
 impl From<String> for Color {
-    /// Нераспознанный цвет становится белым, а не ошибкой конфига: оверлей не должен
-    /// отказываться стартовать из-за опечатки в одном поле темы.
+    /// An unrecognised colour becomes white rather than a config error: the overlay should not
+    /// refuse to start over a typo in one theme field.
     fn from(s: String) -> Self {
         Color::parse(&s).unwrap_or(Color::WHITE)
     }
@@ -74,21 +74,21 @@ impl From<Color> for String {
     }
 }
 
-/// Палитра оверлея. Вендорные цвета применяются поверх неё, если включены в конфиге.
+/// The overlay palette. Vendor colours are applied on top of it when enabled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Theme {
-    /// Основной цвет цифр.
+    /// Primary colour for values.
     pub text: Color,
-    /// Подписи метрик — приглушённее цифр.
+    /// Metric labels — dimmer than the values.
     pub label: Color,
-    /// Подложка. Полностью прозрачная означает «без фона».
+    /// The backing panel. Fully transparent means "no background".
     pub background: Color,
-    /// Цвета шкалы «хорошо / внимание / плохо» для загрузки и температур.
+    /// Good / warning / bad scale, used for load and temperature.
     pub good: Color,
     pub warn: Color,
     pub bad: Color,
-    /// Красить ли имена и метрики CPU/GPU в фирменные цвета вендора.
+    /// Whether CPU and GPU names and metrics take their vendor's brand colour.
     pub vendor_colors: bool,
 }
 
@@ -107,7 +107,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Цвет для значения по шкале нагрузки: до 60% спокойный, до 85% предупреждающий, дальше тревожный.
+    /// Colour for a value on the load scale: calm below 60%, warning below 85%, alarming above.
     pub fn load_color(&self, pct: f32) -> Color {
         match pct {
             p if p < 60.0 => self.good,
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn a_typo_in_the_theme_does_not_stop_the_overlay_from_starting() {
-        assert_eq!(Color::from("не цвет".to_string()), Color::WHITE);
+        assert_eq!(Color::from("not a colour".to_string()), Color::WHITE);
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
         let half = Color::rgba(0xFF, 0xFF, 0xFF, 0x80).to_premultiplied_f32();
         assert!(
             (half[0] - half[3]).abs() < 1e-6,
-            "белый premultiplied равен своей альфе"
+            "premultiplied white equals its own alpha"
         );
 
         let clear = Color::TRANSPARENT.to_premultiplied_f32();

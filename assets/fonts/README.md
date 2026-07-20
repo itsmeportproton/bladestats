@@ -1,26 +1,28 @@
-# Шрифты
+# Fonts
 
-bladestats рисует текст через собственный глиф-атлас, чтобы Windows и Linux выглядели
-одинаково. Нужен один файл:
+bladestats renders text through its own glyph atlas so that Windows and Linux look identical.
+One file is required:
 
     JetBrainsMono-Regular.ttf
 
-Он **не хранится в репозитории** — бинарные ассеты раздувают историю git, а лицензия
-позволяет свободно скачивать его самому.
+It is **not stored in the repository** — binary assets bloat git history, and the licence lets
+you fetch it yourself.
 
-## Откуда взять
+## Where to get it
 
-Официальные релизы: <https://github.com/JetBrains/JetBrainsMono/releases>
+Official releases: <https://github.com/JetBrains/JetBrainsMono/releases>
 
-Из архива нужны два файла, оба кладутся в эту директорию:
+Two files from the archive go into this directory:
 
-- `JetBrainsMono-Regular.ttf` — сам шрифт;
-- `OFL.txt` / `LICENSE` из архива → переименовать в `LICENSE-JetBrainsMono.txt`.
+- `JetBrainsMono-Regular.ttf` — the font itself;
+- `OFL.txt` from the archive, renamed to `LICENSE-JetBrainsMono.txt`.
 
-## Почему именно он
+## Why this font
 
-Моноширинный — цифры не «прыгают» при смене значений, что для мониторинга важнее всего.
-Лицензия — SIL Open Font License 1.1 (в версиях до 2.0 шрифт был под Apache-2.0, сейчас нет).
-OFL разрешает вшивать шрифт в бинарник и распространять без каких-либо отчислений, но требует
-сохранять текст лицензии при любом распространении — поэтому `LICENSE-JetBrainsMono.txt` не
-опционален и лежит в репозитории, в отличие от самого `.ttf`.
+Monospaced, so digits do not shift as values change — the single most important property for a
+monitor that updates ten times a second.
+
+The licence is the SIL Open Font License 1.1 (versions before 2.0 were Apache-2.0; they are
+not any more). OFL permits embedding the font in a binary and redistributing it with no fees
+attached, but requires the licence text to travel with it — which is why
+`LICENSE-JetBrainsMono.txt` is committed even though the `.ttf` is not.

@@ -1,8 +1,8 @@
-//! Софтверный предпросмотр оверлея: рисует HUD в PNG без графического API.
+//! Software preview of the overlay: renders the HUD to a PNG with no graphics API involved.
 //!
-//! Нужен, чтобы проверять раскладку, шрифт и цвета глазами, не поднимая D3D11 или Vulkan, —
-//! и чтобы при отладке было с чем сравнить, когда на экране появится что-то не то. Это
-//! отладочный инструмент, в поставку он не входит.
+//! Useful for checking layout, font and colours by eye without bringing up D3D11 or Vulkan,
+//! and for having something to compare against when the on-screen result looks wrong. A
+//! debugging tool; it is not part of any release.
 //!
 //! ```sh
 //! cargo run -p bs-render --example preview
@@ -18,8 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme = Theme::default();
     let opts = HudOptions::default();
 
-    // Два состояния рядом: пустой снапшот (так оверлей выглядит до первого замера) и
-    // заполненный. Первый важнее — на нём видно, что нечитаемые метрики дают прочерк.
+    // Two states side by side: an empty snapshot (how the overlay looks before the first
+    // sample) and a populated one. The empty case matters more — it shows that unreadable
+    // metrics come out as dashes.
     for (name, snapshot) in [
         ("empty", MetricsSnapshot::default()),
         ("populated", populated()),
@@ -30,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let path = format!("target/preview-{name}.png");
         write_png(&path, &pixels, w, h)?;
-        println!("{path}  {w}x{h}, квадов: {}", list.indices.len() / 6);
+        println!("{path}  {w}x{h}, quads: {}", list.indices.len() / 6);
     }
 
     let path = "target/preview-atlas.png";
@@ -44,10 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Растеризует список отрисовки в RGBA8 на CPU.
+/// Rasterises the draw list to RGBA8 on the CPU.
 ///
-/// Умеет ровно то, что делает настоящий шейдер оверлея: билинейно не фильтрует, берёт
-/// покрытие из атласа и смешивает premultiplied-цвет поверх накопленного.
+/// Does exactly what the real overlay shader does: no filtering, coverage sampled from the
+/// atlas, premultiplied colour blended over what is already there.
 fn rasterize(list: &DrawList, atlas: &GlyphAtlas, w: usize, h: usize) -> Vec<u8> {
     let mut buf = vec![0u8; w * h * 4];
 
@@ -75,7 +76,7 @@ fn rasterize(list: &DrawList, atlas: &GlyphAtlas, w: usize, h: usize) -> Vec<u8>
                 }
 
                 let coverage = if u0 == u1 {
-                    1.0 // сплошная заливка: белый тексель
+                    1.0 // solid fill: the opaque texel
                 } else {
                     let tx = ((u0 + (u1 - u0) * fx) * atlas.width as f32) as usize;
                     let ty = ((vv0 + (vv1 - vv0) * fy) * atlas.height as f32) as usize;
@@ -144,8 +145,8 @@ fn write_png(
     w: usize,
     h: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Оверлей полупрозрачный, поэтому под него подкладывается шахматка — иначе на белом фоне
-    // просмотрщика не понять, где прозрачность, а где светлый текст.
+    // The overlay is semi-transparent, so a checkerboard goes underneath it — against a white
+    // viewer background there would be no telling transparency from pale text.
     let mut composited = vec![0u8; w * h * 4];
     for y in 0..h {
         for x in 0..w {
@@ -157,7 +158,7 @@ fn write_png(
             };
             let a = rgba[o + 3] as f32 / 255.0;
             for ch in 0..3 {
-                // Цвет уже premultiplied, поэтому фон домешивается через (1 - a).
+                // The colour is already premultiplied, so the background mixes in via (1 - a).
                 composited[o + ch] =
                     (rgba[o + ch] as f32 + checker as f32 * (1.0 - a)).min(255.0) as u8;
             }

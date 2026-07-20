@@ -2,8 +2,8 @@
 **/*.rs.bk
 *.pdb
 
-# Шрифт скачивается скриптом, а не хранится в репозитории (см. assets/fonts/README.md).
+# The font is fetched by hand rather than stored here (see assets/fonts/README.md).
 /assets/fonts/*.ttf
 
-# Локальный конфиг для ручных прогонов
+# Local config used for manual runs
 /bladestats.toml

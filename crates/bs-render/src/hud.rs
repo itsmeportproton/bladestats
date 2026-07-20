@@ -1,24 +1,24 @@
-//! Раскладка оверлея: снапшот превращается в строки, строки — в геометрию.
+//! Overlay layout: the snapshot becomes rows, the rows become geometry.
 //!
-//! Раскладка общая для обеих ОС. Отсутствующие метрики рисуются прочерком, а не нулём —
-//! это прямое следствие соглашения `Option` из `bs-core`: пользователь должен видеть
-//! разницу между «ноль ватт» и «сенсора нет».
+//! The layout is shared by both platforms. Metrics that could not be read are drawn as a dash
+//! rather than a zero — a direct consequence of the `Option` convention in `bs-core`: the user
+//! must be able to tell "zero watts" from "no sensor".
 
 use bs_core::{Color, MetricsSnapshot, Power, Theme};
 
 use crate::atlas::GlyphAtlas;
 use crate::draw::DrawList;
 
-/// Чем заполняется метрика, которую не удалось прочитать.
+/// What fills a metric that could not be read.
 const MISSING: &str = "—";
 
 #[derive(Debug, Clone)]
 pub struct HudOptions {
-    /// Отступ от края подложки до текста.
+    /// Gap between the edge of the backing panel and the text.
     pub padding: f32,
-    /// Показывать ли загрузку каждого ядра отдельной шкалой.
+    /// Whether to show each core's load as its own bar.
     pub show_cores: bool,
-    /// Ширина шкалы ядра в пикселях.
+    /// Width of one core bar, in pixels.
     pub core_bar_width: f32,
 }
 
@@ -32,7 +32,7 @@ impl Default for HudOptions {
     }
 }
 
-/// Итоговый размер оверлея — по нему платформа задаёт размер окна.
+/// The resulting overlay size — the platform sizes its window from this.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HudSize {
     pub width: f32,
@@ -53,7 +53,7 @@ impl Span {
     }
 }
 
-/// Строит геометрию оверлея и сообщает его размер.
+/// Builds the overlay geometry and reports its size.
 pub fn build(
     atlas: &GlyphAtlas,
     snapshot: &MetricsSnapshot,
@@ -67,7 +67,7 @@ pub fn build(
         .map(|row| row.iter().map(|s| atlas.measure(&s.text)).sum::<f32>())
         .fold(0.0f32, f32::max);
 
-    // Шкалы ядер живут в собственной строке под метриками CPU.
+    // Core bars live on their own row below the CPU metrics.
     let cores = &snapshot.cpu.cores;
     let core_row_width = if opts.show_cores && !cores.is_empty() {
         cores.len() as f32 * opts.core_bar_width
@@ -104,10 +104,10 @@ pub fn build(
     (list, size)
 }
 
-/// Загрузка ядер отдельными вертикальными шкалами.
+/// Per-core load as individual vertical bars.
 ///
-/// Числами это занимало бы несколько строк на любом современном процессоре, а глазу от
-/// оверлея нужна форма распределения, а не точные проценты по каждому ядру.
+/// As numbers this would take several lines on any modern CPU, and what the eye wants from an
+/// overlay is the shape of the distribution, not exact per-core percentages.
 fn draw_core_bars(
     list: &mut DrawList,
     atlas: &GlyphAtlas,
@@ -125,8 +125,8 @@ fn draw_core_bars(
         let h = (core.load_pct.clamp(0.0, 100.0) / 100.0) * max_h;
         let w = opts.core_bar_width - gap;
 
-        // Тусклая колея во всю высоту, чтобы простаивающие ядра были видны как ядра,
-        // а не как пустое место.
+        // A dim full-height track, so idle cores still read as cores rather than as empty
+        // space.
         list.rect(atlas, x, top, w, max_h, Color::rgba(0xFF, 0xFF, 0xFF, 0x22));
         list.rect(
             atlas,
@@ -151,7 +151,7 @@ fn rows(s: &MetricsSnapshot, theme: &Theme) -> Vec<Vec<Span>> {
         label
     };
 
-    // FPS
+    // Frames
     let frames = s.frames.as_ref();
     rows.push(vec![
         Span::new("FPS  ", label),
@@ -209,7 +209,7 @@ fn rows(s: &MetricsSnapshot, theme: &Theme) -> Vec<Vec<Span>> {
         Span::new(pair_gb(s.gpu.vram_used_bytes, s.gpu.vram_total_bytes), text),
     ]);
 
-    // ОЗУ. Ватт здесь нет намеренно: у памяти нет сенсора мощности.
+    // Memory. No watts here on purpose: RAM has no power sensor.
     rows.push(vec![
         Span::new("RAM  ", label),
         Span::new(pair_gb(s.memory.used_bytes, s.memory.total_bytes), text),
@@ -237,7 +237,8 @@ fn load_color(theme: &Theme, pct: Option<f32>) -> Color {
     pct.map_or(theme.label, |p| theme.load_color(p))
 }
 
-/// Самая высокая частота среди ядер: под нагрузкой интересен буст, а не среднее по простою.
+/// The highest clock across cores: under load the boost clock is what matters, not an average
+/// dragged down by idle cores.
 fn peak_core_mhz(s: &MetricsSnapshot) -> Option<f32> {
     s.cpu
         .cores
@@ -264,7 +265,7 @@ fn opt_fps(v: Option<f32>) -> String {
     v.map_or(MISSING.into(), |v| format!("{v:.0}"))
 }
 
-/// Ватты с пометкой источника: тильда означает расчётную оценку, а не показание сенсора.
+/// Watts, tagged with their provenance: a tilde means a derived estimate, not a sensor reading.
 fn watts(p: Option<Power>) -> String {
     match p {
         None => MISSING.into(),
@@ -352,7 +353,7 @@ mod tests {
         assert!(text.contains(MISSING));
         assert!(
             !text.contains("0%") && !text.contains("0 W"),
-            "не прочитанная метрика не должна выглядеть как настоящий ноль: {text}"
+            "an unread metric must not look like a genuine zero: {text}"
         );
     }
 
@@ -365,23 +366,23 @@ mod tests {
         let text = all_text(&populated());
         assert!(
             text.contains("~65 W"),
-            "оценка ваттов CPU обязана быть помечена"
+            "an estimated CPU wattage must be marked as one"
         );
         assert!(text.contains("145 W") && !text.contains("~145 W"));
     }
 
     #[test]
     fn ram_row_never_shows_watts() {
-        // У памяти нет сенсора мощности, и строка про неё не должна его выдумывать.
+        // RAM has no power sensor, and its row must not invent one.
         let s = populated();
         let ram = rows(&s, &Theme::default())
             .into_iter()
             .find(|r| r[0].text.starts_with("RAM"))
-            .expect("строка RAM");
+            .expect("the RAM row");
         let joined: String = ram.iter().map(|s| s.text.as_str()).collect();
         assert!(
             !joined.contains('W'),
-            "в строке ОЗУ не должно быть ваттов: {joined}"
+            "the memory row must not contain watts: {joined}"
         );
         assert!(joined.contains("6000 MHz"));
     }
@@ -394,15 +395,15 @@ mod tests {
         let without = rows(&MetricsSnapshot::default(), &Theme::default());
         assert!(
             !without.iter().any(|r| r[0].text.contains("1%")),
-            "без источника кадров строка перцентилей не имеет смысла"
+            "without a frame source the percentile row means nothing"
         );
     }
 
     #[test]
     fn missing_low_percentile_is_a_dash_while_the_row_still_shows() {
         let text = all_text(&populated());
-        assert!(text.contains("98"), "1% low известен");
-        // 0.1% low на 500 кадрах не считается — прочерк, а не выдуманное число.
+        assert!(text.contains("98"), "the 1% low is known");
+        // A 0.1% low over 500 frames is not computed — a dash, not an invented number.
         assert!(text.contains(MISSING));
     }
 
@@ -467,10 +468,10 @@ mod tests {
 
         let (_, small) = build(&atlas, &few, &theme, &opts);
         let (_, big) = build(&atlas, &many, &theme, &opts);
-        assert!(big.width > small.width, "64 ядра шире четырёх");
+        assert!(big.width > small.width, "64 cores are wider than 4");
         assert_eq!(
             big.height, small.height,
-            "шкалы ядер занимают одну строку независимо от их числа"
+            "core bars occupy one row regardless of how many there are"
         );
     }
 
@@ -508,12 +509,12 @@ mod tests {
         for v in &list.vertices {
             assert!(
                 v.pos[0] >= -0.5 && v.pos[0] <= size.width + 0.5,
-                "по X: {:?}",
+                "on X: {:?}",
                 v.pos
             );
             assert!(
                 v.pos[1] >= -0.5 && v.pos[1] <= size.height + 0.5,
-                "по Y: {:?}",
+                "on Y: {:?}",
                 v.pos
             );
         }
@@ -535,10 +536,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        // Первый квад — подложка; без неё геометрия начинается сразу с текста.
+        // The first quad is normally the backing panel; without it geometry starts at the text.
         assert!(
             list.vertices[0].color[3] > 0.0,
-            "первым идёт видимый текст, а не пустой фон"
+            "visible text comes first, not an empty background"
         );
     }
 }

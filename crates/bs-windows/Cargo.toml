@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Оверлей bladestats под Windows: окно поверх игры, D3D11 и DirectComposition"
+description = "bladestats overlay on Windows: an always-on-top window, D3D11 and DirectComposition"
 
 [[bin]]
 name = "bladestats"

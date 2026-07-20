@@ -1,4 +1,4 @@
-//! Окно оверлея: поверх всего, сквозное для мыши, никогда не забирающее фокус.
+//! The overlay window: always on top, transparent to the mouse, never taking focus.
 
 use anyhow::{Context, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -10,7 +10,7 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
-/// Класс окна. Регистрируется один раз за процесс.
+/// Window class name. Registered once per process.
 const CLASS_NAME: PCWSTR = w!("BladestatsOverlay");
 
 pub struct OverlayWindow {
@@ -18,24 +18,26 @@ pub struct OverlayWindow {
 }
 
 impl OverlayWindow {
-    /// Создаёт окно оверлея заданного размера в точке `(x, y)` экранных координат.
+    /// Creates the overlay window of the given size at screen position `(x, y)`.
     ///
-    /// Набор расширенных стилей здесь — не украшение, каждый из них обязателен:
+    /// The set of extended styles is not decoration; every one of them is load-bearing:
     ///
-    /// - `WS_EX_NOREDIRECTIONBITMAP` — у окна нет буфера перенаправления, картинку целиком
-    ///   отдаёт DirectComposition. Именно это даёт настоящую попиксельную альфу. Заметим, что
-    ///   `WS_EX_LAYERED` тут не только не нужен, но и вреден: он включает старый путь через
-    ///   `UpdateLayeredWindow`, несовместимый с композицией.
-    /// - `WS_EX_TRANSPARENT` — окно прозрачно для попадания мыши, клики уходят в игру.
-    /// - `WS_EX_NOACTIVATE` — окно не получает фокус, поэтому не выдёргивает игру из
-    ///   полноэкранного режима и не мешает вводу.
-    /// - `WS_EX_TOOLWINDOW` — нет кнопки в панели задач и в Alt-Tab.
-    /// - `WS_EX_TOPMOST` — поверх остальных окон; удерживается не только этим флагом,
-    ///   см. [`OverlayWindow::reassert_topmost`].
+    /// - `WS_EX_NOREDIRECTIONBITMAP` — the window has no redirection surface, and
+    ///   DirectComposition supplies the entire image. This is what produces true per-pixel
+    ///   alpha. Note that `WS_EX_LAYERED` is not merely unnecessary here but harmful: it
+    ///   selects the older `UpdateLayeredWindow` path, which composition does not work with.
+    /// - `WS_EX_TRANSPARENT` — the window is transparent to hit-testing, so clicks reach the
+    ///   game.
+    /// - `WS_EX_NOACTIVATE` — the window never takes focus, so it cannot knock a game out of
+    ///   fullscreen or interfere with input.
+    /// - `WS_EX_TOOLWINDOW` — no taskbar button, no Alt-Tab entry.
+    /// - `WS_EX_TOPMOST` — above other windows; kept there by more than this flag alone, see
+    ///   [`OverlayWindow::reassert_topmost`].
     pub fn new(x: i32, y: i32, width: i32, height: i32) -> Result<Self> {
         unsafe {
-            // Ставим осознание DPI из кода, а не манифестом: манифест понадобится позже
-            // ради прав администратора для ETW, и до тех пор его лучше не заводить.
+            // DPI awareness is set from code rather than from a manifest: a manifest will be
+            // needed later for the administrator rights that ETW requires, and until then it
+            // is better not to introduce one.
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
             let instance = GetModuleHandleW(None).context("GetModuleHandleW")?;
@@ -48,7 +50,7 @@ impl OverlayWindow {
                 hbrBackground: HBRUSH::default(),
                 ..Default::default()
             };
-            // Повторная регистрация того же класса безобидна и возвращает 0 — не проверяем.
+            // Re-registering the same class is harmless and returns 0, so it is not checked.
             RegisterClassExW(&class);
 
             let hwnd = CreateWindowExW(
@@ -75,13 +77,14 @@ impl OverlayWindow {
         }
     }
 
-    /// Возвращает окно на самый верх.
+    /// Puts the window back on top.
     ///
-    /// Одного `WS_EX_TOPMOST` при создании не хватает: игра, переходя в полноэкранный режим
-    /// или просто активируясь, перебивает порядок окон и оверлей уезжает под неё. Поэтому
-    /// порядок подтверждается заново — по таймеру и при смене активного окна.
+    /// `WS_EX_TOPMOST` at creation is not enough on its own: a game going fullscreen, or
+    /// merely being activated, reorders the window stack and the overlay slips underneath. So
+    /// the Z-order is reasserted — on a timer, and when the foreground window changes.
     ///
-    /// `SWP_NOACTIVATE` обязателен: без него мы бы отбирали фокус у игры каждую секунду.
+    /// `SWP_NOACTIVATE` is mandatory; without it this would steal focus from the game once a
+    /// second.
     pub fn reassert_topmost(&self) {
         unsafe {
             let _ = SetWindowPos(
@@ -96,8 +99,8 @@ impl OverlayWindow {
         }
     }
 
-    /// Понадобится на этапе слежения за целью: оверлей переезжает вслед за окном игры
-    /// на другой монитор.
+    /// Needed once target tracking lands: the overlay follows the game's window when it moves
+    /// to another monitor.
     #[allow(dead_code)]
     pub fn set_position(&self, x: i32, y: i32) {
         unsafe {
@@ -127,8 +130,8 @@ impl OverlayWindow {
         }
     }
 
-    /// Понадобится, когда появится определение exclusive fullscreen: в нём оверлей
-    /// прячется целиком.
+    /// Needed once exclusive-fullscreen detection lands: in that mode the overlay hides
+    /// entirely.
     #[allow(dead_code)]
     pub fn show(&self, visible: bool) {
         unsafe {
@@ -140,8 +143,8 @@ impl OverlayWindow {
 extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {
-            // Подстраховка к WS_EX_TRANSPARENT: сообщаем системе, что попадания в это окно
-            // нет вовсе, и курсор с кликами достаются тому, кто под нами.
+            // Backstop for WS_EX_TRANSPARENT: tell the system there is no hit here at all, so
+            // the cursor and clicks go to whatever is underneath.
             WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
             WM_DESTROY => {
                 PostQuitMessage(0);
