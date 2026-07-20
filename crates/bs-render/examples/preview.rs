@@ -8,14 +8,14 @@
 //! cargo run -p bs-render --example preview
 //! ```
 
-use bs_core::{CoreMetrics, FrameMetrics, GpuMetrics, MetricsSnapshot, Power, Theme, Vendor};
+use bs_core::{Config, CoreMetrics, FrameMetrics, GpuMetrics, MetricsSnapshot, Power, Vendor};
 use bs_render::{DrawList, GlyphAtlas, HudOptions, hud};
 
 const FONT_PX: f32 = 16.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let atlas = GlyphAtlas::new(bs_render::EMBEDDED_FONT, FONT_PX)?;
-    let theme = Theme::default();
+    let config = Config::default();
     let opts = HudOptions::default();
 
     // Two states side by side: an empty snapshot (how the overlay looks before the first
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("empty", MetricsSnapshot::default()),
         ("populated", populated()),
     ] {
-        let (list, size) = hud::build(&atlas, &snapshot, &theme, &opts);
+        let (list, size) = hud::build(&atlas, &snapshot, &config, &opts);
         let (w, h) = (size.width.ceil() as usize, size.height.ceil() as usize);
         let pixels = rasterize(&list, &atlas, w, h);
 

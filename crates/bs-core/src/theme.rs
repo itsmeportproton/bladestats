@@ -75,8 +75,11 @@ impl From<Color> for String {
 }
 
 /// The overlay palette. Vendor colours are applied on top of it when enabled.
+///
+/// Unknown keys are ignored rather than rejected, for the same reason as the rest of the
+/// config: a theme written by a newer build must still open in an older one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Theme {
     /// Primary colour for values.
     pub text: Color,

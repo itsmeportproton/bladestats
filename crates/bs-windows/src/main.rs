@@ -3,11 +3,13 @@
 //! Everything substantial lives in the library next to this file; see its documentation for
 //! why the split exists.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bs_core::{
-    CoreMetrics, FrameMetrics, GpuMetrics, MetricsSnapshot, Power, SnapshotHub, Theme, Vendor,
+    Config, CoreMetrics, FrameMetrics, GpuMetrics, LoadOutcome, MetricsSnapshot, Power,
+    SnapshotHub, Vendor,
 };
 use bs_render::{GlyphAtlas, HudOptions, hud};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -15,15 +17,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use bs_windows::renderer::Renderer;
-use bs_windows::window::OverlayWindow;
+use bs_windows::window::{self, OverlayWindow};
 use bs_windows::{etw, target};
-
-/// Overlay font size. Becomes a setting once the config lands.
-const FONT_PX: f32 = 16.0;
-
-/// Redraw rate. 10 Hz: numbers on screen cannot be read faster than that anyway, and every
-/// extra overlay frame is time taken from the game.
-const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How often the window is pushed back on top. Games reorder the window stack when they
 /// activate, and without this the overlay eventually ends up underneath.
@@ -31,6 +26,13 @@ const TOPMOST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How often the foreground window is re-examined to decide what to report on.
 const TARGET_INTERVAL: Duration = Duration::from_millis(500);
+
+/// How often the settings file is checked for changes.
+///
+/// Polling rather than a filesystem watch: one `stat` a second costs nothing next to the rest
+/// of this program, and it avoids a dependency and a background thread for a file that changes
+/// when somebody clicks a checkbox.
+const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -41,17 +43,35 @@ fn main() -> Result<()> {
         .init();
 
     let demo = std::env::args().any(|a| a == "--demo");
-    if demo {
-        tracing::info!("demo mode: the metrics shown are fabricated");
-    }
+    let selftest = std::env::args().any(|a| a == "--etw-selftest");
 
-    let atlas = GlyphAtlas::new(bs_render::EMBEDDED_FONT, FONT_PX)
-        .map_err(|e| anyhow::anyhow!("could not build the glyph atlas: {e}"))?;
-    let theme = Theme::default();
+    let config_path = bs_core::config::default_path();
+    let (mut config, outcome) = Config::load(&config_path);
+    report_config(&config_path, &outcome);
+
+    // Write the defaults out on a first run so there is something to edit. A portable program
+    // that keeps its settings invisible until a separate tool creates them is a program whose
+    // settings nobody finds. Failure here is not fatal: a read-only directory means no file,
+    // not no overlay.
+    if outcome == LoadOutcome::Missing
+        && let Err(e) = config.save(&config_path)
+    {
+        tracing::warn!(path = %config_path.display(), error = %e, "could not write default settings");
+    }
+    let mut config_stamp = modified_at(&config_path);
+
+    // A parse error has to reach the screen. Somebody who edited the file by hand and got it
+    // wrong is not reading a console.
+    let mut notice = match &outcome {
+        LoadOutcome::Invalid(why) => Some(format!("config ignored: {why}")),
+        _ => None,
+    };
+
+    let mut atlas = build_atlas(config.placement.font_size)?;
     let opts = HudOptions::default();
     let hub = SnapshotHub::new();
     let mut frames = None;
-    let mut notice = None;
+
     if demo {
         hub.store(demo_snapshot());
     } else {
@@ -70,45 +90,59 @@ fn main() -> Result<()> {
         }
     }
 
-    // In self-test mode the source watches bladestats itself. Our own present rate is known
-    // exactly — it is REDRAW_INTERVAL — so the reported figure can be checked against a
-    // number we control, without needing a game to hand.
-    let selftest = std::env::args().any(|a| a == "--etw-selftest");
-    let own_pid = std::process::id();
-    if selftest && let Some(source) = &frames {
-        source.set_target(own_pid);
-        tracing::info!(
-            pid = own_pid,
-            expected_fps = 1000 / REDRAW_INTERVAL.as_millis(),
-            "self-test: tracing our own presents"
-        );
-    }
-
     // The layout drives the window size, not the other way round: the HUD knows how much room
     // it needs.
-    let (_, size) = hud::build(&atlas, &hub.load(), &theme, &opts);
-    let overlay = OverlayWindow::new(32, 32, size.width.ceil() as i32, size.height.ceil() as i32)?;
-    let mut renderer = Renderer::new(
-        overlay.hwnd,
-        &atlas,
-        size.width.ceil() as u32,
-        size.height.ceil() as u32,
-    )?;
+    let (_, size) = hud::build(&atlas, &hub.load(), &config, &opts);
+    let (mut w, mut h) = (size.width.ceil() as i32, size.height.ceil() as i32);
+    let (x, y) = window::corner_position(config.placement.corner, config.placement.margin, w, h);
 
-    tracing::info!(
-        width = size.width,
-        height = size.height,
-        "overlay running; press Ctrl+C in this console to stop it"
-    );
+    let overlay = OverlayWindow::new(x, y, w, h)?;
+    let mut renderer = Renderer::new(overlay.hwnd, &atlas, w as u32, h as u32)?;
 
-    let mut last_draw = Instant::now() - REDRAW_INTERVAL;
+    let own_pid = std::process::id();
+    if selftest && let Some(source) = &frames {
+        // Our own present rate is known exactly, so the reported figure can be checked
+        // against a number this program controls rather than against a guess.
+        source.set_target(own_pid);
+        tracing::info!(pid = own_pid, "self-test: tracing our own presents");
+    }
+
+    tracing::info!(width = w, height = h, "overlay running");
+
+    let mut redraw_interval = refresh_interval(&config);
+    let mut last_draw = Instant::now() - redraw_interval;
     let mut last_topmost = Instant::now();
     let mut last_target = Instant::now() - TARGET_INTERVAL;
+    let mut last_config = Instant::now();
     let mut visible = true;
 
     loop {
         if pump_messages() {
             break;
+        }
+
+        // Settings changed underneath us, most likely because the configurator saved.
+        if last_config.elapsed() >= CONFIG_POLL_INTERVAL {
+            last_config = Instant::now();
+            let stamp = modified_at(&config_path);
+            if stamp != config_stamp {
+                config_stamp = stamp;
+                let (next, outcome) = Config::load(&config_path);
+                report_config(&config_path, &outcome);
+
+                if next.placement.font_size != config.placement.font_size {
+                    atlas = build_atlas(next.placement.font_size)?;
+                    renderer.set_atlas(&atlas)?;
+                }
+                notice = match &outcome {
+                    LoadOutcome::Invalid(why) => Some(format!("config ignored: {why}")),
+                    _ => notice.filter(|n| !n.starts_with("config ignored")),
+                };
+                config = next;
+                redraw_interval = refresh_interval(&config);
+                // Force the next tick to redraw and reposition.
+                last_draw = Instant::now() - redraw_interval;
+            }
         }
 
         if last_topmost.elapsed() >= TOPMOST_INTERVAL {
@@ -121,15 +155,6 @@ fn main() -> Result<()> {
             if let Some(t) = target::current(own_pid) {
                 if let Some(source) = &frames {
                     source.set_target(t.pid);
-                    let (seen, used) = source.observed_events();
-                    tracing::debug!(
-                        pid = t.pid,
-                        mode = ?t.mode,
-                        seen,
-                        used,
-                        fps = ?source.metrics(etw::now_ns()).map(|m| m.fps),
-                        "target"
-                    );
                 }
                 // Nothing can be composited over an exclusive-fullscreen swapchain, so the
                 // overlay hides instead of sitting invisibly behind it.
@@ -141,22 +166,7 @@ fn main() -> Result<()> {
             }
         }
 
-        if selftest && last_target.elapsed() >= Duration::from_secs(2) {
-            last_target = Instant::now();
-            if let Some(source) = &frames {
-                let (seen, used) = source.observed_events();
-                let measured = source.metrics(etw::now_ns()).map(|m| m.avg_fps);
-                tracing::info!(
-                    seen,
-                    used,
-                    ?measured,
-                    expected = 1000 / REDRAW_INTERVAL.as_millis(),
-                    "self-test"
-                );
-            }
-        }
-
-        if last_draw.elapsed() >= REDRAW_INTERVAL {
+        if last_draw.elapsed() >= redraw_interval {
             last_draw = Instant::now();
 
             let mut snapshot = (*hub.load()).clone();
@@ -164,12 +174,16 @@ fn main() -> Result<()> {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
             snapshot.notice = notice.clone();
-            let (list, size) = hud::build(&atlas, &snapshot, &theme, &opts);
 
-            let (w, h) = (size.width.ceil() as u32, size.height.ceil() as u32);
-            if renderer.size() != (w, h) {
-                overlay.resize(w as i32, h as i32);
-                renderer.resize(w, h)?;
+            let (list, size) = hud::build(&atlas, &snapshot, &config, &opts);
+            let (nw, nh) = (size.width.ceil() as i32, size.height.ceil() as i32);
+
+            if (nw, nh) != (w, h) {
+                (w, h) = (nw, nh);
+                let (x, y) =
+                    window::corner_position(config.placement.corner, config.placement.margin, w, h);
+                overlay.set_bounds(x, y, w, h);
+                renderer.resize(w as u32, h as u32)?;
             }
             renderer.render(&list)?;
         }
@@ -180,6 +194,35 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn refresh_interval(config: &Config) -> Duration {
+    Duration::from_secs_f32(1.0 / config.placement.refresh_hz.max(1) as f32)
+}
+
+fn build_atlas(font_size: f32) -> Result<GlyphAtlas> {
+    GlyphAtlas::new(bs_render::EMBEDDED_FONT, font_size)
+        .map_err(|e| anyhow::anyhow!("could not build the glyph atlas: {e}"))
+}
+
+/// Modification time, or `None` when the file is absent or unreadable.
+///
+/// Both cases compare equal to themselves, so a missing config does not look like a change on
+/// every poll.
+fn modified_at(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+fn report_config(path: &PathBuf, outcome: &LoadOutcome) {
+    match outcome {
+        LoadOutcome::Loaded => tracing::info!(path = %path.display(), "settings loaded"),
+        LoadOutcome::Missing => {
+            tracing::info!(path = %path.display(), "no settings file yet; using defaults")
+        }
+        LoadOutcome::Invalid(why) => {
+            tracing::warn!(path = %path.display(), error = %why, "settings ignored")
+        }
+    }
 }
 
 /// Drains pending messages. Returns `true` when it is time to quit.
@@ -197,7 +240,7 @@ fn pump_messages() -> bool {
     false
 }
 
-/// Fabricated metrics for checking the overlay's appearance while telemetry does not exist yet.
+/// Fabricated metrics for checking the overlay's appearance without hardware access.
 fn demo_snapshot() -> MetricsSnapshot {
     let mut s = MetricsSnapshot::default();
     s.cpu.name = Some("AMD Ryzen 7 7800X3D 8-Core Processor".into());

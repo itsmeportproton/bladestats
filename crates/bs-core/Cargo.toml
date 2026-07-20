@@ -10,3 +10,4 @@ description = "Platform-independent core of bladestats: metrics, frame timing, c
 [dependencies]
 arc-swap.workspace = true
 serde.workspace = true
+toml.workspace = true

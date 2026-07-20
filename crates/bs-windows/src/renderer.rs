@@ -192,6 +192,18 @@ impl Renderer {
         (self.width, self.height)
     }
 
+    /// Replaces the glyph atlas, for when the font size changes.
+    ///
+    /// Only the texture is rebuilt. Tearing down the whole device to change a font size would
+    /// flash the overlay off and back on, and the swapchain and composition tree have nothing
+    /// to do with which glyphs are in the atlas.
+    pub fn set_atlas(&mut self, atlas: &GlyphAtlas) -> Result<()> {
+        let (texture, srv) = upload_atlas(&self.device, atlas)?;
+        self._atlas_texture = texture;
+        self.atlas_srv = srv;
+        Ok(())
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
         let (width, height) = (width.max(1), height.max(1));
         if (width, height) == (self.width, self.height) {

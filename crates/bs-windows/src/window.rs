@@ -1,7 +1,8 @@
 //! The overlay window: always on top, transparent to the mouse, never taking focus.
 
 use anyhow::{Context, Result};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use bs_core::Corner;
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::HBRUSH;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
@@ -116,16 +117,21 @@ impl OverlayWindow {
         }
     }
 
-    pub fn resize(&self, width: i32, height: i32) {
+    /// Moves and resizes in one call.
+    ///
+    /// One call rather than two so the overlay cannot be seen at the new size in the old
+    /// place: anchored to a right or bottom corner, the two happen to disagree by exactly the
+    /// amount the window grew.
+    pub fn set_bounds(&self, x: i32, y: i32, width: i32, height: i32) {
         unsafe {
             let _ = SetWindowPos(
                 self.hwnd,
                 Some(HWND_TOPMOST),
-                0,
-                0,
+                x,
+                y,
                 width,
                 height,
-                SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
         }
     }
@@ -137,6 +143,39 @@ impl OverlayWindow {
         unsafe {
             let _ = ShowWindow(self.hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
         }
+    }
+}
+
+/// Screen position for a window of this size in the requested corner.
+///
+/// Uses the work area rather than the full screen, so a bottom-anchored overlay does not end
+/// up underneath the taskbar.
+pub fn corner_position(corner: Corner, margin: f32, width: i32, height: i32) -> (i32, i32) {
+    let mut work = RECT::default();
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut work as *mut RECT as *mut _),
+            Default::default(),
+        )
+    }
+    .is_ok();
+
+    if !ok {
+        return (margin as i32, margin as i32);
+    }
+
+    let m = margin as i32;
+    let (left, top) = (work.left + m, work.top + m);
+    let right = work.right - m - width;
+    let bottom = work.bottom - m - height;
+
+    match corner {
+        Corner::TopLeft => (left, top),
+        Corner::TopRight => (right, top),
+        Corner::BottomLeft => (left, bottom),
+        Corner::BottomRight => (right, bottom),
     }
 }
 

@@ -4,7 +4,7 @@
 //! rather than a zero — a direct consequence of the `Option` convention in `bs-core`: the user
 //! must be able to tell "zero watts" from "no sensor".
 
-use bs_core::{Color, MetricsSnapshot, Power, Theme};
+use bs_core::{Color, Config, MetricsSnapshot, Power, Theme};
 
 use crate::atlas::GlyphAtlas;
 use crate::draw::DrawList;
@@ -12,12 +12,15 @@ use crate::draw::DrawList;
 /// What fills a metric that could not be read.
 const MISSING: &str = "—";
 
+/// Layout constants that are not worth exposing as settings.
+///
+/// Everything the user actually chooses — which readings appear, the colours, the font
+/// size — lives in [`Config`]. These are the numbers that only matter to whether the
+/// panel looks right.
 #[derive(Debug, Clone)]
 pub struct HudOptions {
     /// Gap between the edge of the backing panel and the text.
     pub padding: f32,
-    /// Whether to show each core's load as its own bar.
-    pub show_cores: bool,
     /// Width of one core bar, in pixels.
     pub core_bar_width: f32,
 }
@@ -26,7 +29,6 @@ impl Default for HudOptions {
     fn default() -> Self {
         Self {
             padding: 8.0,
-            show_cores: true,
             core_bar_width: 4.0,
         }
     }
@@ -57,10 +59,11 @@ impl Span {
 pub fn build(
     atlas: &GlyphAtlas,
     snapshot: &MetricsSnapshot,
-    theme: &Theme,
+    config: &Config,
     opts: &HudOptions,
 ) -> (DrawList, HudSize) {
-    let rows = rows(snapshot, theme);
+    let theme = &config.theme;
+    let rows = rows(snapshot, config);
 
     let text_width = rows
         .iter()
@@ -69,7 +72,7 @@ pub fn build(
 
     // Core bars live on their own row below the CPU metrics.
     let cores = &snapshot.cpu.cores;
-    let core_row_width = if opts.show_cores && !cores.is_empty() {
+    let core_row_width = if config.metrics.cpu_cores && !cores.is_empty() {
         cores.len() as f32 * opts.core_bar_width
     } else {
         0.0
@@ -139,7 +142,13 @@ fn draw_core_bars(
     }
 }
 
-fn rows(s: &MetricsSnapshot, theme: &Theme) -> Vec<Vec<Span>> {
+/// Turns the snapshot into rows, honouring which readings the user asked for.
+///
+/// A row that would carry nothing is dropped entirely rather than left as a lone label, so
+/// switching readings off actually shrinks the overlay instead of leaving gaps behind.
+fn rows(s: &MetricsSnapshot, config: &Config) -> Vec<Vec<Span>> {
+    let theme = &config.theme;
+    let m = &config.metrics;
     let mut rows = Vec::new();
     let label = theme.label;
     let text = theme.text;
@@ -153,76 +162,126 @@ fn rows(s: &MetricsSnapshot, theme: &Theme) -> Vec<Vec<Span>> {
 
     // Frames
     let frames = s.frames.as_ref();
-    rows.push(vec![
-        Span::new("FPS  ", label),
-        Span::new(
-            frames.map_or(MISSING.into(), |f| format!("{:.0}", f.fps)),
-            frames.map_or(label, |_| text),
-        ),
-        Span::new(
-            frames.map_or(String::new(), |f| format!("  {:.1} ms", f.frametime_ms)),
-            label,
-        ),
-    ]);
-    if let Some(f) = frames {
-        rows.push(vec![
-            Span::new("     1% ", label),
-            Span::new(opt_fps(f.low_1pct), text),
-            Span::new("  0.1% ", label),
-            Span::new(opt_fps(f.low_01pct), text),
-        ]);
+    if m.fps || m.frame_time {
+        let mut row = vec![Span::new("FPS  ", label)];
+        if m.fps {
+            row.push(Span::new(
+                frames.map_or(MISSING.into(), |f| format!("{:.0}", f.fps)),
+                frames.map_or(label, |_| text),
+            ));
+        }
+        if m.frame_time {
+            row.push(Span::new(
+                frames.map_or(String::new(), |f| format!("  {:.1} ms", f.frametime_ms)),
+                label,
+            ));
+        }
+        rows.push(row);
+    }
+    if let Some(f) = frames
+        && (m.low_1pct || m.low_01pct)
+    {
+        let mut row = vec![Span::new("     ", label)];
+        if m.low_1pct {
+            row.push(Span::new("1% ", label));
+            row.push(Span::new(opt_fps(f.low_1pct), text));
+        }
+        if m.low_01pct {
+            row.push(Span::new("  0.1% ", label));
+            row.push(Span::new(opt_fps(f.low_01pct), text));
+        }
+        rows.push(row);
     }
 
     // CPU
-    rows.push(vec![
-        Span::new("CPU  ", label),
-        Span::new(
-            s.cpu.name.clone().unwrap_or_else(|| MISSING.into()),
-            cpu_color,
-        ),
-    ]);
-    rows.push(vec![
-        Span::new("     ", label),
-        Span::new(pct(s.cpu.load_pct), load_color(theme, s.cpu.load_pct)),
-        Span::new(format!("  {}", mhz(peak_core_mhz(s))), text),
-        Span::new(format!("  {}", temp(s.cpu.temp_c)), text),
-        Span::new(format!("  {}", watts(s.cpu.power)), text),
-    ]);
+    if m.cpu_name {
+        rows.push(vec![
+            Span::new("CPU  ", label),
+            Span::new(
+                s.cpu.name.clone().unwrap_or_else(|| MISSING.into()),
+                cpu_color,
+            ),
+        ]);
+    }
+    if m.cpu_load || m.cpu_clock || m.cpu_temp || m.cpu_power {
+        let mut row = vec![Span::new(if m.cpu_name { "     " } else { "CPU  " }, label)];
+        if m.cpu_load {
+            row.push(Span::new(
+                pct(s.cpu.load_pct),
+                load_color(theme, s.cpu.load_pct),
+            ));
+        }
+        if m.cpu_clock {
+            row.push(Span::new(format!("  {}", mhz(peak_core_mhz(s))), text));
+        }
+        if m.cpu_temp {
+            row.push(Span::new(format!("  {}", temp(s.cpu.temp_c)), text));
+        }
+        if m.cpu_power {
+            row.push(Span::new(format!("  {}", watts(s.cpu.power)), text));
+        }
+        rows.push(row);
+    }
 
     // GPU
-    rows.push(vec![
-        Span::new("GPU  ", label),
-        Span::new(
-            s.gpu.name.clone().unwrap_or_else(|| MISSING.into()),
-            gpu_color,
-        ),
-    ]);
-    rows.push(vec![
-        Span::new("     ", label),
-        Span::new(pct(s.gpu.load_pct), load_color(theme, s.gpu.load_pct)),
-        Span::new(format!("  {}", mhz(s.gpu.core_clock_mhz)), text),
-        Span::new(format!("  {}", temp(s.gpu.temp_c)), text),
-        Span::new(format!("  {}", watts(s.gpu.power)), text),
-    ]);
-    rows.push(vec![
-        Span::new("VRAM ", label),
-        Span::new(pair_gb(s.gpu.vram_used_bytes, s.gpu.vram_total_bytes), text),
-    ]);
+    if m.gpu_name {
+        rows.push(vec![
+            Span::new("GPU  ", label),
+            Span::new(
+                s.gpu.name.clone().unwrap_or_else(|| MISSING.into()),
+                gpu_color,
+            ),
+        ]);
+    }
+    if m.gpu_load || m.gpu_clock || m.gpu_temp || m.gpu_power {
+        let mut row = vec![Span::new(if m.gpu_name { "     " } else { "GPU  " }, label)];
+        if m.gpu_load {
+            row.push(Span::new(
+                pct(s.gpu.load_pct),
+                load_color(theme, s.gpu.load_pct),
+            ));
+        }
+        if m.gpu_clock {
+            row.push(Span::new(format!("  {}", mhz(s.gpu.core_clock_mhz)), text));
+        }
+        if m.gpu_temp {
+            row.push(Span::new(format!("  {}", temp(s.gpu.temp_c)), text));
+        }
+        if m.gpu_power {
+            row.push(Span::new(format!("  {}", watts(s.gpu.power)), text));
+        }
+        rows.push(row);
+    }
+    if m.gpu_vram {
+        rows.push(vec![
+            Span::new("VRAM ", label),
+            Span::new(pair_gb(s.gpu.vram_used_bytes, s.gpu.vram_total_bytes), text),
+        ]);
+    }
 
     // Memory. No watts here on purpose: RAM has no power sensor.
-    rows.push(vec![
-        Span::new("RAM  ", label),
-        Span::new(pair_gb(s.memory.used_bytes, s.memory.total_bytes), text),
-        Span::new(
-            s.memory
-                .speed_mhz
-                .map_or(String::new(), |m| format!("  {m} MHz")),
-            label,
-        ),
-    ]);
+    if m.ram_usage || m.ram_spec {
+        let mut row = vec![Span::new("RAM  ", label)];
+        if m.ram_usage {
+            row.push(Span::new(
+                pair_gb(s.memory.used_bytes, s.memory.total_bytes),
+                text,
+            ));
+        }
+        if m.ram_spec {
+            row.push(Span::new(
+                s.memory
+                    .speed_mhz
+                    .map_or(String::new(), |m| format!("  {m} MT/s")),
+                label,
+            ));
+        }
+        rows.push(row);
+    }
 
     // Explains a missing metric, so a blank frame rate reads as a known limitation rather
-    // than as a broken program.
+    // than as a broken program. Never suppressed by settings: it exists precisely for the
+    // case where the user cannot tell why something is empty.
     if let Some(notice) = &s.notice {
         rows.push(vec![Span::new(notice.clone(), theme.warn)]);
     }
@@ -264,7 +323,7 @@ fn mhz(v: Option<f32>) -> String {
 }
 
 fn temp(v: Option<f32>) -> String {
-    v.map_or(MISSING.into(), |v| format!("{v:.0}°C"))
+    v.map_or(MISSING.into(), |v| format!("{v:.0}В°C"))
 }
 
 fn opt_fps(v: Option<f32>) -> String {
@@ -292,7 +351,7 @@ fn pair_gb(used: Option<u64>, total: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bs_core::{CoreMetrics, FrameMetrics, Vendor};
+    use bs_core::{CoreMetrics, FrameMetrics, Metrics, Vendor};
 
     fn atlas() -> Option<GlyphAtlas> {
         let path = concat!(
@@ -344,13 +403,63 @@ mod tests {
         s
     }
 
-    fn all_text(s: &MetricsSnapshot) -> String {
-        rows(s, &Theme::default())
+    /// Everything on, so a test that switches one reading off is testing that switch alone.
+    fn everything() -> Config {
+        let mut config = Config::default();
+        config.metrics = Metrics {
+            fps: true,
+            frame_time: true,
+            low_1pct: true,
+            low_01pct: true,
+            cpu_name: true,
+            cpu_load: true,
+            cpu_cores: true,
+            cpu_clock: true,
+            cpu_temp: true,
+            cpu_power: true,
+            gpu_name: true,
+            gpu_load: true,
+            gpu_clock: true,
+            gpu_vram: true,
+            gpu_temp: true,
+            gpu_power: true,
+            ram_usage: true,
+            ram_spec: true,
+        };
+        config
+    }
+
+    fn text_of(s: &MetricsSnapshot, config: &Config) -> String {
+        rows(s, config)
             .iter()
             .flat_map(|r| r.iter())
             .map(|s| s.text.clone())
             .collect::<Vec<_>>()
             .join("|")
+    }
+
+    fn all_text(s: &MetricsSnapshot) -> String {
+        text_of(s, &everything())
+    }
+
+    /// Guards a real regression: an encoding accident once turned this constant into three
+    /// Cyrillic characters. It still compiled, still passed every test that only checked for
+    /// "the missing marker", and would have drawn every unread metric as blank cells, because
+    /// none of those characters are in the atlas.
+    #[test]
+    fn the_missing_marker_is_a_single_character_the_atlas_can_draw() {
+        let atlas = atlas_or_skip!();
+        let mut chars = MISSING.chars();
+        let dash = chars.next().expect("the marker cannot be empty");
+        assert_eq!(
+            chars.next(),
+            None,
+            "the marker must be one character: {MISSING:?}"
+        );
+        assert!(
+            atlas.glyph(dash).is_some(),
+            "the marker is not in the atlas and would render as nothing: {dash:?}"
+        );
     }
 
     #[test]
@@ -372,7 +481,7 @@ mod tests {
         let text = all_text(&populated());
         assert!(
             text.contains("~65 W"),
-            "an estimated CPU wattage must be marked as one"
+            "an estimated CPU wattage must be marked"
         );
         assert!(text.contains("145 W") && !text.contains("~145 W"));
     }
@@ -381,63 +490,110 @@ mod tests {
     fn ram_row_never_shows_watts() {
         // RAM has no power sensor, and its row must not invent one.
         let s = populated();
-        let ram = rows(&s, &Theme::default())
+        let ram = rows(&s, &everything())
             .into_iter()
             .find(|r| r[0].text.starts_with("RAM"))
             .expect("the RAM row");
         let joined: String = ram.iter().map(|s| s.text.as_str()).collect();
         assert!(
             !joined.contains('W'),
-            "the memory row must not contain watts: {joined}"
+            "no watts in the memory row: {joined}"
         );
-        assert!(joined.contains("6000 MHz"));
+        assert!(joined.contains("6000 MT/s"));
+    }
+
+    #[test]
+    fn switching_a_reading_off_removes_it() {
+        let s = populated();
+        let mut config = everything();
+
+        assert!(
+            text_of(&s, &config).contains("62"),
+            "GPU temperature starts visible"
+        );
+        config.metrics.gpu_temp = false;
+        assert!(
+            !text_of(&s, &config).contains("62"),
+            "a reading switched off must leave nothing behind"
+        );
+    }
+
+    #[test]
+    fn a_row_with_nothing_left_in_it_disappears_entirely() {
+        let s = populated();
+        let mut config = everything();
+        config.metrics.cpu_load = false;
+        config.metrics.cpu_clock = false;
+        config.metrics.cpu_temp = false;
+        config.metrics.cpu_power = false;
+
+        // The name row survives, but the readings row must not linger as a bare label.
+        let rows = rows(&s, &config);
+        let cpu_rows: Vec<_> = rows.iter().filter(|r| r[0].text.trim() == "CPU").collect();
+        assert_eq!(cpu_rows.len(), 1, "only the name row should remain");
+        assert!(
+            rows.iter().all(|r| r.len() > 1),
+            "no row should be a lone label"
+        );
+    }
+
+    #[test]
+    fn hiding_the_name_promotes_the_readings_row_to_carry_the_label() {
+        let s = populated();
+        let mut config = everything();
+        config.metrics.cpu_name = false;
+
+        // Without this the readings would sit under a blank gutter with nothing saying which
+        // device they belong to.
+        let rows = rows(&s, &config);
+        assert!(
+            rows.iter().any(|r| r[0].text.starts_with("CPU")),
+            "something still has to say these numbers are the processor's"
+        );
     }
 
     #[test]
     fn lows_row_appears_only_when_there_are_frames() {
-        let with = rows(&populated(), &Theme::default());
-        assert!(with.iter().any(|r| r[0].text.contains("1%")));
-
-        let without = rows(&MetricsSnapshot::default(), &Theme::default());
+        let config = everything();
         assert!(
-            !without.iter().any(|r| r[0].text.contains("1%")),
+            rows(&populated(), &config)
+                .iter()
+                .any(|r| r.iter().any(|s| s.text.contains("1%")))
+        );
+
+        let without = rows(&MetricsSnapshot::default(), &config);
+        assert!(
+            !without
+                .iter()
+                .any(|r| r.iter().any(|s| s.text.contains("1%"))),
             "without a frame source the percentile row means nothing"
         );
-    }
-
-    #[test]
-    fn missing_low_percentile_is_a_dash_while_the_row_still_shows() {
-        let text = all_text(&populated());
-        assert!(text.contains("98"), "the 1% low is known");
-        // A 0.1% low over 500 frames is not computed — a dash, not an invented number.
-        assert!(text.contains(MISSING));
     }
 
     #[test]
     fn vendor_colours_apply_to_names_and_can_be_switched_off() {
         let s = populated();
 
-        let mut on = Theme::default();
-        on.vendor_colors = true;
-        let gpu_row = rows(&s, &on)
+        let mut on = everything();
+        on.theme.vendor_colors = true;
+        let row = rows(&s, &on)
             .into_iter()
             .find(|r| r[0].text.starts_with("GPU"));
-        assert_eq!(gpu_row.unwrap()[1].color, Vendor::Nvidia.color().unwrap());
+        assert_eq!(row.unwrap()[1].color, Vendor::Nvidia.color().unwrap());
 
-        let mut off = Theme::default();
-        off.vendor_colors = false;
-        let gpu_row = rows(&s, &off)
+        let mut off = everything();
+        off.theme.vendor_colors = false;
+        let row = rows(&s, &off)
             .into_iter()
             .find(|r| r[0].text.starts_with("GPU"));
-        assert_eq!(gpu_row.unwrap()[1].color, off.label);
+        assert_eq!(row.unwrap()[1].color, off.theme.label);
     }
 
     #[test]
     fn cpu_vendor_colour_is_derived_from_its_name() {
         let mut s = populated();
         s.cpu.name = Some("Intel Core i9-13900K".into());
-        let theme = Theme::default();
-        let row = rows(&s, &theme)
+        let row = rows(&s, &everything())
             .into_iter()
             .find(|r| r[0].text.starts_with("CPU"))
             .unwrap();
@@ -462,9 +618,43 @@ mod tests {
     }
 
     #[test]
+    fn the_notice_survives_every_setting() {
+        // It exists to explain why something is missing, so settings must not be able to
+        // silence it.
+        let mut s = populated();
+        s.notice = Some("no FPS: run as administrator".into());
+
+        let mut nothing = Config::default();
+        nothing.metrics = Metrics {
+            fps: false,
+            frame_time: false,
+            low_1pct: false,
+            low_01pct: false,
+            cpu_name: false,
+            cpu_load: false,
+            cpu_cores: false,
+            cpu_clock: false,
+            cpu_temp: false,
+            cpu_power: false,
+            gpu_name: false,
+            gpu_load: false,
+            gpu_clock: false,
+            gpu_vram: false,
+            gpu_temp: false,
+            gpu_power: false,
+            ram_usage: false,
+            ram_spec: false,
+        };
+
+        let rows = rows(&s, &nothing);
+        assert_eq!(rows.len(), 1, "everything off leaves only the notice");
+        assert!(rows[0][0].text.contains("administrator"));
+    }
+
+    #[test]
     fn hud_grows_with_the_number_of_cores() {
         let atlas = atlas_or_skip!();
-        let theme = Theme::default();
+        let config = everything();
         let opts = HudOptions::default();
 
         let mut few = populated();
@@ -472,44 +662,33 @@ mod tests {
         let mut many = populated();
         many.cpu.cores = vec![CoreMetrics::default(); 64];
 
-        let (_, small) = build(&atlas, &few, &theme, &opts);
-        let (_, big) = build(&atlas, &many, &theme, &opts);
+        let (_, small) = build(&atlas, &few, &config, &opts);
+        let (_, big) = build(&atlas, &many, &config, &opts);
         assert!(big.width > small.width, "64 cores are wider than 4");
         assert_eq!(
             big.height, small.height,
-            "core bars occupy one row regardless of how many there are"
+            "core bars occupy one row regardless"
         );
     }
 
     #[test]
     fn hiding_cores_removes_their_row() {
         let atlas = atlas_or_skip!();
-        let theme = Theme::default();
         let s = populated();
+        let opts = HudOptions::default();
 
-        let shown = build(&atlas, &s, &theme, &HudOptions::default()).1;
-        let hidden = build(
-            &atlas,
-            &s,
-            &theme,
-            &HudOptions {
-                show_cores: false,
-                ..Default::default()
-            },
-        )
-        .1;
+        let shown = build(&atlas, &s, &everything(), &opts).1;
+        let mut hidden_config = everything();
+        hidden_config.metrics.cpu_cores = false;
+        let hidden = build(&atlas, &s, &hidden_config, &opts).1;
+
         assert!(hidden.height < shown.height);
     }
 
     #[test]
     fn geometry_stays_inside_the_reported_size() {
         let atlas = atlas_or_skip!();
-        let (list, size) = build(
-            &atlas,
-            &populated(),
-            &Theme::default(),
-            &HudOptions::default(),
-        );
+        let (list, size) = build(&atlas, &populated(), &everything(), &HudOptions::default());
 
         assert!(!list.is_empty());
         for v in &list.vertices {
@@ -529,18 +708,15 @@ mod tests {
     #[test]
     fn a_transparent_background_produces_no_backing_quad() {
         let atlas = atlas_or_skip!();
-        let mut theme = Theme::default();
-        theme.background = Color::TRANSPARENT;
+        let mut config = everything();
+        config.theme.background = Color::TRANSPARENT;
+        config.metrics.cpu_cores = false;
 
-        let empty = MetricsSnapshot::default();
         let (list, _) = build(
             &atlas,
-            &empty,
-            &theme,
-            &HudOptions {
-                show_cores: false,
-                ..Default::default()
-            },
+            &MetricsSnapshot::default(),
+            &config,
+            &HudOptions::default(),
         );
         // The first quad is normally the backing panel; without it geometry starts at the text.
         assert!(
