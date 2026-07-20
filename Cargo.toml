@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bs-core",
+    "crates/bs-render",
+    "crates/bs-telemetry",
+]
+# bs-windows и bs-linux-layer добавляются в members на своих этапах.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/bladestats/bladestats"
+
+[workspace.dependencies]
+bs-core = { path = "crates/bs-core" }
+bs-render = { path = "crates/bs-render" }
+bs-telemetry = { path = "crates/bs-telemetry" }
+
+ab_glyph = "0.2.32"
+anyhow = "1"
+arc-swap = "1.9"
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+# Оверлей должен быть маленьким и быстрым: главная метрика качества проекта.
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

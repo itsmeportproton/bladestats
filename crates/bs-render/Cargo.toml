@@ -1,0 +1,12 @@
+[package]
+name = "bs-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Глиф-атлас и раскладка оверлея, общие для Windows и Linux"
+
+[dependencies]
+bs-core.workspace = true
+ab_glyph.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "bs-telemetry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Сбор телеметрии железа: трейты сэмплеров и бэкенды под Windows и Linux"
+
+[dependencies]
+bs-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+# NVIDIA-бэкенд. nvml.dll всё равно грузится динамически, так что сборка с этой фичей
+# работает и на машинах без NVIDIA — бэкенд просто не зарегистрируется.
+nvidia = ["dep:nvml-wrapper"]
+
+[dependencies.nvml-wrapper]
+version = "0.12.1"
+optional = true

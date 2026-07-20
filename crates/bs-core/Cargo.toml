@@ -1,0 +1,12 @@
+[package]
+name = "bs-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Платформо-независимое ядро bladestats: метрики, тайминги кадров, конфиг, тема"
+
+[dependencies]
+arc-swap.workspace = true
+serde.workspace = true

@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Шрифт скачивается скриптом, а не хранится в репозитории (см. assets/fonts/README.md).
+/assets/fonts/*.ttf
+
+# Локальный конфиг для ручных прогонов
+/bladestats.toml
