@@ -11,7 +11,7 @@ use std::ffi::c_void;
 
 use anyhow::{Context, Result, anyhow};
 use bs_render::{DrawList, GlyphAtlas, Vertex};
-use windows::Win32::Foundation::{HMODULE, HWND};
+use windows::Win32::Foundation::{DXGI_STATUS_OCCLUDED, HANDLE, HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
@@ -61,10 +61,23 @@ struct Params {
     _padding: [f32; 2],
 }
 
+/// Flags the swapchain is created with, and — just as importantly — resized with.
+///
+/// Passing these at creation and forgetting them in `ResizeBuffers` silently drops the waitable
+/// object the first time the panel changes size, after which the loop has nothing to wait on
+/// and degenerates into a spin. They are named once here so the two cannot drift apart.
+const SWAP_CHAIN_FLAGS: DXGI_SWAP_CHAIN_FLAG = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+
 pub struct Renderer {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     swapchain: IDXGISwapChain1,
+    /// Signalled when the display is ready for another frame. The loop waits on this instead
+    /// of sleeping, which is what paces the overlay to the monitor without burning a core.
+    frame_latency: HANDLE,
+    /// Set while the window is covered or minimised, when presenting would be work with
+    /// nothing on the other end of it.
+    occluded: bool,
     rtv: Option<ID3D11RenderTargetView>,
 
     // The composition tree must outlive nothing less than the renderer itself: while these
@@ -132,11 +145,21 @@ impl Renderer {
                         // Composition requires the flip model and premultiplied alpha.
                         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                         AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
+                        // The waitable object is what lets the loop pace itself to the display
+                        // without parking inside Present. Blocking in the driver would mean
+                        // window messages and housekeeping waited on the display too.
+                        Flags: SWAP_CHAIN_FLAGS.0 as u32,
                         ..Default::default()
                     },
                     None,
                 )
                 .context("CreateSwapChainForComposition")?;
+
+            // One frame of latency: the overlay has nothing queued up worth buffering, and a
+            // deeper queue would only make it lag behind the game it is describing.
+            let swapchain2: IDXGISwapChain2 = swapchain.cast().context("IDXGISwapChain2")?;
+            swapchain2.SetMaximumFrameLatency(1)?;
+            let frame_latency = swapchain2.GetFrameLatencyWaitableObject();
 
             // The composition tree: device → a target bound to the window → a visual holding
             // the swapchain.
@@ -164,6 +187,8 @@ impl Renderer {
                 device,
                 context,
                 swapchain,
+                frame_latency,
+                occluded: false,
                 rtv: None,
                 _dcomp_device: dcomp_device,
                 _dcomp_target: dcomp_target,
@@ -214,19 +239,63 @@ impl Renderer {
             // ResizeBuffers.
             self.rtv = None;
             self.context.OMSetRenderTargets(None, None);
+            // The same flags as at creation, or the waitable object is lost here.
             self.swapchain
-                .ResizeBuffers(
-                    0,
-                    width,
-                    height,
-                    DXGI_FORMAT_UNKNOWN,
-                    DXGI_SWAP_CHAIN_FLAG(0),
-                )
+                .ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, SWAP_CHAIN_FLAGS)
                 .context("ResizeBuffers")?;
         }
         self.width = width;
         self.height = height;
         self.create_rtv()
+    }
+
+    /// The handle to wait on before drawing the next frame.
+    pub fn frame_latency(&self) -> HANDLE {
+        self.frame_latency
+    }
+
+    /// Whether the window is currently covered, and presenting would be wasted work.
+    pub fn is_occluded(&self) -> bool {
+        self.occluded
+    }
+
+    /// Asks the swapchain whether it is worth drawing again.
+    ///
+    /// Called while occluded, in place of a real frame. `DXGI_PRESENT_TEST` performs no work
+    /// and touches no buffers; it exists precisely so a program can find out that it has become
+    /// visible again without having to present blindly to find out.
+    pub fn poll_occlusion(&mut self) -> bool {
+        unsafe {
+            let hr = self.swapchain.Present(0, DXGI_PRESENT_TEST);
+            self.occluded = hr == DXGI_STATUS_OCCLUDED;
+        }
+        self.occluded
+    }
+
+    /// Presents one frame, synchronised to the display.
+    ///
+    /// The interval has to be 1 and not 0, which cost a measurement to learn. The frame-latency
+    /// waitable object does not pace anything by itself: it signals when the swapchain has room
+    /// for another frame, and with interval 0 frames retire the instant they are submitted, so
+    /// it is permanently signalled and the loop free-runs. Measured at 6% of the machine — the
+    /// budget is 0.7%.
+    ///
+    /// With interval 1 the display sets the rhythm, and the waitable object's job is the one it
+    /// is actually for: moving the wait *out* of `Present` and into the loop's own wait, where
+    /// window messages, the topmost check and the settings poll are all still being watched.
+    fn present(&mut self) -> Result<()> {
+        unsafe {
+            let hr = self.swapchain.Present(1, DXGI_PRESENT(0));
+            // Being covered is an ordinary state, not a failure: a minimised game means the
+            // overlay should stop working, not fall over.
+            if hr == DXGI_STATUS_OCCLUDED {
+                self.occluded = true;
+                return Ok(());
+            }
+            self.occluded = false;
+            hr.ok()?;
+        }
+        Ok(())
     }
 
     fn create_rtv(&mut self) -> Result<()> {
@@ -256,8 +325,7 @@ impl Renderer {
             self.context.OMSetRenderTargets(Some(&[Some(rtv)]), None);
 
             if list.is_empty() {
-                self.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
-                return Ok(());
+                return self.present();
             }
 
             self.upload_geometry(list)?;
@@ -309,12 +377,8 @@ impl Renderer {
                 .OMSetBlendState(&self.blend, Some(&[0.0; 4]), 0xFFFF_FFFF);
 
             self.context.DrawIndexed(list.indices.len() as u32, 0, 0);
-
-            // Interval 1: the overlay has no reason to outrun the display, and extra frames
-            // are just extra watts.
-            self.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
-        Ok(())
+        self.present()
     }
 
     /// Uploads vertices and indices, reallocating the buffers with headroom when they no

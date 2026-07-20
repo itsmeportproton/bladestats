@@ -15,8 +15,10 @@ use anyhow::Result;
 use bs_core::{Config, LoadOutcome, SnapshotHub};
 use bs_render::{GlyphAtlas, HudOptions};
 use bs_render::hud::{HudState, Motion};
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage, WM_QUIT,
+    DispatchMessageW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
+    PeekMessageW, QS_ALLINPUT, TranslateMessage, WM_QUIT,
 };
 
 use crate::renderer::Renderer;
@@ -36,6 +38,20 @@ const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How often what the counter costs reaches the log.
 const COST_REPORT_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How often fresh readings are picked up from the sampling thread.
+///
+/// Faster than the hardware is sampled, because the frame rate is derived here rather than on
+/// that thread and it is the one reading that visibly moves. Everything else simply repeats a
+/// value it already had, which costs a comparison.
+const SAMPLE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How often a covered window checks whether it has been uncovered.
+const OCCLUSION_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Longest the loop will ever wait without looking around, so a missed wake-up costs a fraction
+/// of a second rather than a session.
+const IDLE_WAIT_CAP: Duration = Duration::from_millis(500);
 
 /// Runs the overlay until its window is closed.
 ///
@@ -82,8 +98,14 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let own_pid = std::process::id();
     tracing::info!(width = w, height = h, "overlay running");
 
+    // While something is moving the display sets the pace. This is the floor underneath that:
+    // how often the panel is redrawn when nothing is animating at all, which is what catches
+    // the changes no animation reports — a device name arriving, a notice appearing, a block
+    // switched on in the settings.
     let mut redraw_interval = refresh_interval(&current);
     let mut last_draw = Instant::now() - redraw_interval;
+    let sample_interval = SAMPLE_POLL_INTERVAL;
+    let mut last_sample = Instant::now() - sample_interval;
     let mut last_topmost = Instant::now();
     let mut last_target = Instant::now() - TARGET_INTERVAL;
     let mut last_config = Instant::now();
@@ -166,19 +188,26 @@ pub fn run(config_path: PathBuf) -> Result<()> {
             }
         }
 
-        if last_draw.elapsed() >= redraw_interval {
-            let dt = last_draw.elapsed();
-            last_draw = Instant::now();
-
+        // Readings arrive on their own schedule, far slower than frames. Keeping the two apart
+        // is the whole point: the panel is redrawn to animate, not because anything new was
+        // read.
+        if last_sample.elapsed() >= sample_interval {
+            last_sample = Instant::now();
             let mut snapshot = (*hub.load()).clone();
             if let Some(source) = &frames {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
             context.fps = snapshot.frames.as_ref().map(|f| f.fps);
             snapshot.notice = notice.clone();
-
             state.on_sample(snapshot);
-            state.step(dt);
+        }
+
+        let dt = last_draw.elapsed();
+        let animating = state.step(dt);
+        let due = dt >= redraw_interval;
+
+        if visible && !renderer.is_occluded() && (animating || due) {
+            last_draw = Instant::now();
             let (list, size) = state.paint(&atlas);
             let (nw, nh) = (size.width.ceil() as i32, size.height.ceil() as i32);
 
@@ -196,7 +225,35 @@ pub fn run(config_path: PathBuf) -> Result<()> {
             renderer.render(&list)?;
         }
 
-        std::thread::sleep(Duration::from_millis(5));
+        // Nothing here spins and nothing here sleeps blindly. When the panel is moving the
+        // wait is on the swapchain's frame-latency object, which paces the loop to the display
+        // exactly; when it is still, the wait is on the message queue with a timeout set by
+        // whichever piece of housekeeping is due next. On a desktop with nothing animating
+        // that comes to a handful of wakeups a second instead of two hundred.
+        let now = Instant::now();
+        let mut timeout = [
+            remaining(now, last_config, CONFIG_POLL_INTERVAL),
+            remaining(now, last_topmost, TOPMOST_INTERVAL),
+            remaining(now, last_target, TARGET_INTERVAL),
+            remaining(now, last_sample, sample_interval),
+            remaining(now, last_draw, redraw_interval),
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or(IDLE_WAIT_CAP)
+        .min(IDLE_WAIT_CAP);
+
+        let drawing = visible && !renderer.is_occluded();
+        if renderer.is_occluded() {
+            timeout = timeout.min(OCCLUSION_POLL_INTERVAL);
+        }
+
+        let waitable = (animating && drawing).then(|| renderer.frame_latency());
+        wait_for_work(waitable, timeout);
+
+        if renderer.is_occluded() {
+            renderer.poll_occlusion();
+        }
     }
 
     tracing::info!("overlay stopped");
@@ -218,6 +275,31 @@ fn refresh_interval(config: &Config) -> Duration {
 fn build_atlas(font_size: f32) -> Result<GlyphAtlas> {
     GlyphAtlas::new(bs_render::EMBEDDED_FONT, font_size)
         .map_err(|e| anyhow::anyhow!("could not build the glyph atlas: {e}"))
+}
+
+/// How long until `last + period`, or nothing if it is already due.
+fn remaining(now: Instant, last: Instant, period: Duration) -> Duration {
+    period.saturating_sub(now.saturating_duration_since(last))
+}
+
+/// Waits for the next thing worth waking up for.
+///
+/// `handle`, when given, is the swapchain's frame-latency object: waiting on it is what paces
+/// the overlay to the display. The alternative — presenting with a vsync interval — parks the
+/// thread inside the graphics driver, where it cannot answer a window message, put itself back
+/// on top, or notice the settings file changing. The message queue is watched either way, so
+/// the window stays responsive to the system even while nothing is being drawn.
+fn wait_for_work(handle: Option<HANDLE>, timeout: Duration) {
+    let ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+    let handles = handle.map(|h| [h]);
+    unsafe {
+        MsgWaitForMultipleObjectsEx(
+            handles.as_ref().map(|h| h.as_slice()),
+            ms,
+            QS_ALLINPUT,
+            MWMO_INPUTAVAILABLE,
+        );
+    }
 }
 
 /// Drains this thread's messages. Returns `true` when it is time to stop.
