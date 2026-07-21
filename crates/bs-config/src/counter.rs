@@ -6,6 +6,12 @@
 
 use std::process::{Child, Command};
 
+/// Tells a copy of this program to be the counter rather than the window.
+///
+/// Lives here rather than beside `main` so the settings window can start one back up after
+/// stopping it, without the two spellings drifting apart.
+pub const COUNTER_FLAG: &str = "--counter";
+
 pub struct Counter {
     child: Option<Child>,
     /// Set when it could not be started, with the reason, so the window can say so rather

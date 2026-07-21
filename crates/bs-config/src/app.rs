@@ -28,6 +28,10 @@ const HEADER_H: f32 = 82.0;
 const STATUS_H: f32 = 46.0;
 const FEATURES_W: f32 = 252.0;
 
+/// The size the panel is designed at, so the slider can read as a percentage of it rather than
+/// as a pixel count nobody has an intuition for.
+const DEFAULT_FONT_PX: f32 = 16.0;
+
 /// How long after the last edit the file is written.
 ///
 /// Dragging a slider changes the value dozens of times a second; writing on every one of those
@@ -44,6 +48,9 @@ pub struct ConfigApp {
     cpu_name: String,
     gpu_name: String,
     gpu_vendor: Vendor,
+    /// Kept because the processor's power is a real reading on an AMD package and a model
+    /// everywhere else, and the label beside it has to say which.
+    cpu_vendor: Vendor,
 
     opening: Opening,
     /// Set when a control changes, cleared once the file is written.
@@ -85,6 +92,7 @@ impl ConfigApp {
                 .name
                 .unwrap_or_else(|| "Unknown graphics card".into()),
             gpu_vendor: hardware.gpu.vendor,
+            cpu_vendor,
             config,
             path,
             opening: Opening::new(reduced_motion()),
@@ -358,15 +366,22 @@ impl ConfigApp {
                 changed |= row(ui, &mut m.cpu_load, "Load", "", cpu);
                 changed |= row(ui, &mut m.cpu_cores, "Per-core bars", "", cpu);
                 changed |= row(ui, &mut m.cpu_clock, "Clock speed", "", cpu);
-                changed |= row(ui, &mut m.cpu_temp, "Temperature", "no sensor", cpu);
-                changed |= row(ui, &mut m.cpu_power, "Power draw", "est.", cpu);
+                // Processor temperature is the one reading with no path that avoids a kernel
+                // driver, so it is the only one still labelled as needing help.
+                changed |= row(ui, &mut m.cpu_temp, "Temperature", "needs monitor", cpu);
+                // Power is a real reading on an AMD package and a model everywhere else, and
+                // the label says which — a tilde on screen means the same thing.
+                let cpu_power_note = match self.cpu_vendor {
+                    Vendor::Amd => "",
+                    _ => "estimated",
+                };
+                changed |= row(ui, &mut m.cpu_power, "Power draw", cpu_power_note, cpu);
 
                 group(ui, "GRAPHICS", gpu);
-                // Only NVIDIA has a sensor library wired up, so the note follows the card
-                // rather than pretending every vendor is equal.
+                // The note follows the card rather than pretending every vendor is equal.
+                // AMD and NVIDIA have their sensor libraries wired up; Intel does not yet.
                 let sensors = match self.gpu_vendor {
-                    Vendor::Nvidia => "",
-                    Vendor::Amd => "no AMD",
+                    Vendor::Nvidia | Vendor::Amd => "",
                     Vendor::Intel => "no Intel",
                     Vendor::Unknown => "no driver",
                 };
@@ -375,34 +390,46 @@ impl ConfigApp {
                 changed |= row(ui, &mut m.gpu_clock, "Clock speed", "", gpu);
                 changed |= row(ui, &mut m.gpu_vram, "VRAM", "", gpu);
                 changed |= row(ui, &mut m.gpu_temp, "Temperature", sensors, gpu);
+                changed |= row(ui, &mut m.gpu_hotspot, "Hotspot", sensors, gpu);
+                changed |= row(ui, &mut m.gpu_fan, "Fan speed", sensors, gpu);
                 changed |= row(ui, &mut m.gpu_power, "Power draw", sensors, gpu);
 
                 group(ui, "MEMORY", chrome);
                 changed |= row(ui, &mut m.ram_usage, "Usage", "", chrome);
                 changed |= row(ui, &mut m.ram_spec, "Module spec", "", chrome);
 
+                group(ui, "BEHAVIOUR", chrome);
+                note(
+                    ui,
+                    "The panel unrolls when a game is on screen and rolls away when one \
+                     stops. Ctrl+Alt+B overrides that either way when the detection is wrong.",
+                );
+                changed |= row(
+                    ui,
+                    &mut self.config.behaviour.only_in_games,
+                    "Only in games",
+                    "",
+                    chrome,
+                );
+
                 group(ui, "EXPERIMENTAL", gpu);
                 note(
                     ui,
-                    "Inferred from how the game presents, not read from the driver. Expect \
-                     these to be wrong sometimes, and to break when a driver changes.",
+                    "Read from what the game has loaded, not from the driver. These name what \
+                     is present and cannot say how much: the scaling ratio and the count of \
+                     generated frames live inside the engine. A dash means not visible, which \
+                     is not the same as off.",
                 );
                 let x = &mut self.config.experimental;
                 changed |= row(ui, &mut x.graphics_api, "Graphics API", "", gpu);
                 changed |= row(
                     ui,
                     &mut x.generated_frames,
-                    "Generated frames",
+                    "Frame generation",
                     frame_gen(self.gpu_vendor),
                     gpu,
                 );
-                changed |= row(
-                    ui,
-                    &mut x.render_scale,
-                    "Render scale",
-                    upscaler(self.gpu_vendor),
-                    gpu,
-                );
+                changed |= row(ui, &mut x.render_scale, "Upscaler", "name only", gpu);
                 changed |= row(ui, &mut x.ram_live_rate, "Live transfer rate", "", chrome);
 
                 group(ui, "APPEARANCE", chrome);
@@ -447,6 +474,43 @@ impl ConfigApp {
                 .changed()
             {
                 self.config.theme.background.a = (alpha * 255.0).round() as u8;
+                changed = true;
+            }
+        });
+        ui.add_space(6.0);
+
+        // Size. One slider for the whole panel rather than one for the type: every spacing,
+        // every bar and the corner radius are all stated relative to this, so the panel grows
+        // as a piece instead of the text outgrowing its padding.
+        let mut size = self.config.placement.font_size;
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.label(
+                egui::RichText::new("Monitor size")
+                    .color(theme::TEXT)
+                    .size(13.0),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(14.0);
+                ui.label(
+                    egui::RichText::new(format!("{:.0}%", size / DEFAULT_FONT_PX * 100.0))
+                        .color(theme::MUTED)
+                        .family(FontFamily::Monospace)
+                        .size(11.0),
+                );
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.spacing_mut().slider_width = FEATURES_W - 44.0;
+            ui.visuals_mut().selection.bg_fill = tint;
+            if ui
+                .add(egui::Slider::new(&mut size, 10.0..=32.0).show_value(false))
+                .changed()
+            {
+                // Whole pixels only. The glyphs are rasterised at exactly this size, and a
+                // fractional one is not sharper than the integer below it, only muddier.
+                self.config.placement.font_size = size.round();
                 changed = true;
             }
         });
@@ -581,39 +645,46 @@ impl ConfigApp {
             colour,
         );
 
-        // Stopping the counter needs somewhere to live, and it is not the red light: that
-        // closes this window, which is the common action and must not kill the counter.
-        let stop = Rect::from_min_max(
+        // Starting and stopping the counter needs somewhere to live, and it is not the red
+        // light: that closes this window, which is the common action and must not take the
+        // counter with it. One button that changes what it says, because there is only ever
+        // one sensible thing to do to a counter you can already see the state of.
+        let button = Rect::from_min_max(
             Pos2::new(rect.right() - PAD - 240.0, rect.top() + 12.0),
             Pos2::new(rect.right() - PAD - 150.0, rect.top() + 34.0),
         );
-        if running {
-            let response = ui.interact(stop, ui.id().with("stop"), Sense::click());
-            let p = ui.painter();
-            let tint = if response.hovered() {
-                theme::BAD
-            } else {
-                theme::FAINT
-            };
-            p.rect_stroke(
-                stop,
-                CornerRadius::same(6),
-                Stroke::new(1.0, theme::dim(tint, 0.5)),
-                StrokeKind::Inside,
-            );
-            p.text(
-                stop.center(),
-                Align2::CENTER_CENTER,
-                "stop counter",
-                FontId::new(10.0, FontFamily::Monospace),
-                tint,
-            );
-            if response.clicked() {
+        let response = ui.interact(button, ui.id().with("counter-toggle"), Sense::click());
+        let (verb, hot) = if running {
+            ("stop counter", theme::BAD)
+        } else {
+            ("start counter", theme::GOOD)
+        };
+        let tint = if response.hovered() { hot } else { theme::FAINT };
+
+        let p = ui.painter();
+        p.rect_stroke(
+            button,
+            CornerRadius::same(6),
+            Stroke::new(1.0, theme::dim(tint, 0.5)),
+            StrokeKind::Inside,
+        );
+        p.text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            verb,
+            FontId::new(10.0, FontFamily::Monospace),
+            tint,
+        );
+
+        if response.clicked() {
+            if running {
                 self.counter.stop();
+            } else {
+                self.counter = crate::counter::Counter::start(crate::counter::COUNTER_FLAG);
             }
-            if response.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
+        }
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
     }
 }
@@ -774,15 +845,6 @@ fn frame_gen(vendor: Vendor) -> &'static str {
         Vendor::Amd => "AFMF",
         Vendor::Nvidia => "DLSS-FG",
         Vendor::Intel => "XeSS-FG",
-        Vendor::Unknown => "",
-    }
-}
-
-fn upscaler(vendor: Vendor) -> &'static str {
-    match vendor {
-        Vendor::Amd => "RSR",
-        Vendor::Nvidia => "DLSS",
-        Vendor::Intel => "XeSS",
         Vendor::Unknown => "",
     }
 }
