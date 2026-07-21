@@ -3,8 +3,6 @@
 A hardware monitor and FPS overlay for Windows 10/11. One executable, no installer, no service,
 no account.
 
-![The overlay](docs/overlay.gif)
-
 ![The settings window](docs/settings.png)
 
 ## What it shows

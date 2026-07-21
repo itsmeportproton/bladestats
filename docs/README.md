@@ -1,10 +1,5 @@
 # Screenshots
 
-The two images the main README links to:
+`settings.png` — the settings window, linked from the main README.
 
-- `overlay.gif` — the overlay over a game, a few seconds long. Record it with ShareX or
-  ScreenToGif, 600–800 px wide, and keep it under about 10 MB; a heavy GIF makes the front page
-  slow to open.
-- `settings.png` — the settings window. `Win+Shift+S`, then "Window".
-
-Drop the files in here with those exact names and the README picks them up.
+Retake it with `Win+Shift+S` → "Window", and keep the name.
