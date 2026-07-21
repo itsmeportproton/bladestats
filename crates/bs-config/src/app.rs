@@ -41,6 +41,17 @@ const SAVE_DELAY: Duration = Duration::from_millis(400);
 /// How long "Saved" stays up.
 const SAVED_NOTICE: Duration = Duration::from_secs(2);
 
+/// How far along the offer to install a hardware monitor is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MonitorOffer {
+    /// Waiting for an answer.
+    Asking,
+    Working,
+    /// Fetched and started. It may still take a moment to answer.
+    Done,
+    Failed(String),
+}
+
 pub struct ConfigApp {
     config: Config,
     path: PathBuf,
@@ -51,6 +62,12 @@ pub struct ConfigApp {
     /// Kept because the processor's power is a real reading on an AMD package and a model
     /// everywhere else, and the label beside it has to say which.
     cpu_vendor: Vendor,
+
+    /// The offer to fetch a hardware monitor, and what came of it.
+    ///
+    /// Raised once, on a run that finds no copy and no setting either way. Never raised again:
+    /// somebody who has read it and closed it has answered.
+    monitor_offer: Option<MonitorOffer>,
 
     opening: Opening,
     /// Set when a control changes, cleared once the file is written.
@@ -81,7 +98,16 @@ impl ConfigApp {
             .map(Vendor::from_name)
             .unwrap_or_default();
 
+        // Raised only when there is genuinely nothing to read the temperature from and the
+        // user has not already said one way or the other. Somebody who switched the reading on
+        // has answered; so has somebody with a copy already sitting in the folder.
+        let monitor_offer = (config.sensors.cpu_temp == bs_core::CpuTempChoice::Off
+            && crate::lhm::status(config.sensors.lhm_port) == crate::lhm::Status::Missing
+            && !crate::lhm::serving(config.sensors.lhm_port))
+        .then_some(MonitorOffer::Asking);
+
         Self {
+            monitor_offer,
             accents: Accents::detect(cpu_vendor, hardware.gpu.vendor),
             cpu_name: hardware
                 .cpu
@@ -183,6 +209,123 @@ impl eframe::App for ConfigApp {
 }
 
 impl ConfigApp {
+    /// The offer to fetch a hardware monitor, with the cost of accepting it stated.
+    ///
+    /// The warning is the point of this dialog, not decoration around a button. What is being
+    /// agreed to is a kernel driver of the WinRing0 family being loaded on this machine —
+    /// blocklisted by Microsoft, and the first thing anti-cheat software looks for. That is a
+    /// reasonable thing to accept on a machine you own and an unreasonable thing to arrange
+    /// for somebody without telling them.
+    fn monitor_dialog(&mut self, ui: &mut Ui, rect: Rect) {
+        let Some(state) = self.monitor_offer.clone() else {
+            return;
+        };
+
+        // Everything behind it is dimmed and unreachable: this is a question, and answering it
+        // is the only thing to do until it is answered.
+        ui.painter()
+            .rect_filled(rect, 0.0, Color32::from_black_alpha(190));
+
+        let panel = Rect::from_center_size(rect.center(), Vec2::new(rect.width() - 60.0, 300.0));
+        ui.painter()
+            .rect_filled(panel, CornerRadius::same(14), theme::PANEL);
+        ui.painter().rect_stroke(
+            panel,
+            CornerRadius::same(14),
+            Stroke::new(1.0, theme::LINE),
+            StrokeKind::Inside,
+        );
+
+        let inner = panel.shrink(18.0);
+        let mut child = ui.new_child(UiBuilder::new().max_rect(inner));
+        child.set_clip_rect(inner);
+        let ui = &mut child;
+
+        ui.label(
+            egui::RichText::new("⚠  Processor temperature needs a hardware monitor")
+                .color(theme::WARN)
+                .size(14.0),
+        );
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(
+                "bladestats cannot read it alone. That reading lives behind a kernel driver, \
+                 and this program ships none.\n\n\
+                 LibreHardwareMonitor can, and bladestats can fetch it into its own lhm folder \
+                 and use it. Before you say yes, know what it involves: it loads a driver of \
+                 the WinRing0 family to reach those sensors. That family is on Microsoft's \
+                 blocklist of vulnerable drivers, and anti-cheat software looks for it. On \
+                 your own machine that may be a fine trade. In a competitive game it may not.\n\n\
+                 Everything else — frame rate, load, clocks, graphics temperature and power, \
+                 memory — already works without it.",
+            )
+            .color(theme::MUTED)
+            .size(12.0),
+        );
+        ui.add_space(12.0);
+
+        match state {
+            MonitorOffer::Asking => {
+                ui.horizontal(|ui| {
+                    if ui.button("No thanks").clicked() {
+                        self.monitor_offer = None;
+                    }
+                    if ui.button("Download and install").clicked() {
+                        self.monitor_offer = Some(MonitorOffer::Working);
+                        ui.ctx().request_repaint();
+                    }
+                });
+            }
+            MonitorOffer::Working => {
+                ui.label(
+                    egui::RichText::new("Fetching...")
+                        .color(theme::FAINT)
+                        .size(12.0),
+                );
+                // Done on the next frame rather than on the click, so the window has drawn
+                // "fetching" before it stops answering for the length of a download.
+                let port = self.config.sensors.lhm_port;
+                self.monitor_offer = Some(
+                    match crate::lhm::install().and_then(|()| crate::lhm::configure_and_launch(port))
+                    {
+                        Ok(()) => {
+                            self.config.sensors.cpu_temp = bs_core::CpuTempChoice::Auto;
+                            self.touch();
+                            MonitorOffer::Done
+                        }
+                        Err(why) => MonitorOffer::Failed(why),
+                    },
+                );
+            }
+            MonitorOffer::Done => {
+                ui.label(
+                    egui::RichText::new(
+                        "Installed and started. Restart the counter for the temperature to \
+                         appear. If it stays blank, open LibreHardwareMonitor and switch on \
+                         Options → Remote Web Server → Run.",
+                    )
+                    .color(theme::GOOD)
+                    .size(12.0),
+                );
+                ui.add_space(8.0);
+                if ui.button("Close").clicked() {
+                    self.monitor_offer = None;
+                }
+            }
+            MonitorOffer::Failed(why) => {
+                ui.label(
+                    egui::RichText::new(format!("It did not work: {why}"))
+                        .color(theme::BAD)
+                        .size(12.0),
+                );
+                ui.add_space(8.0);
+                if ui.button("Close").clicked() {
+                    self.monitor_offer = None;
+                }
+            }
+        }
+    }
+
     fn contents(&mut self, ui: &mut Ui, rect: Rect) {
         let titlebar = Rect::from_min_size(rect.min, Vec2::new(rect.width(), TITLEBAR_H));
         self.title_bar(ui, titlebar);
@@ -208,6 +351,9 @@ impl ConfigApp {
 
         self.features(ui, features);
         self.release_log(ui, log);
+
+        // Last, so it covers everything else. A question that can be clicked past is not one.
+        self.monitor_dialog(ui, rect);
     }
 
     fn title_bar(&mut self, ui: &mut Ui, rect: Rect) {

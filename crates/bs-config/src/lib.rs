@@ -7,6 +7,7 @@
 pub mod anim;
 pub mod app;
 pub mod counter;
+pub mod lhm;
 pub mod log;
 pub mod theme;
 
