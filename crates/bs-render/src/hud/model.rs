@@ -435,7 +435,17 @@ fn ram_block(s: &MetricsSnapshot, config: &Config, accent: Color) -> Option<Bloc
         let mut right_from = None;
         // The live rate sits opposite the capacity, the way the design has it: two facts
         // about the same hardware, not a list.
-        if m.ram_spec && let Some(speed) = mem.speed_mhz {
+        // The live rate when the controller can be asked, and the configured one otherwise.
+        // They are the same number at rest and diverge under load, which is the point: memory
+        // clocks down when nothing is asking of it.
+        let rate = if config.experimental.ram_live_rate {
+            mem.live_mts
+                .map(|r| r as u32)
+                .or(mem.speed_mhz)
+        } else {
+            mem.speed_mhz
+        };
+        if m.ram_spec && let Some(speed) = rate {
             right_from = Some(cells.len());
             cells.push(Cell::new(
                 "ram.rate",
@@ -458,7 +468,7 @@ fn ram_block(s: &MetricsSnapshot, config: &Config, accent: Color) -> Option<Bloc
 
     let name = m
         .ram_spec
-        .then(|| text::memory_name(mem.kind, mem.rated_mhz))
+        .then(|| text::memory_name(mem.kind, mem.speed_mhz))
         .flatten();
     finish("RAM", name, accent, rows)
 }

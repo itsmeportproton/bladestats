@@ -110,6 +110,11 @@ pub struct MemoryMetrics {
     /// Capacity of each installed module in megabytes, in slot order. Empty when firmware
     /// would not say.
     pub modules: Vec<u32>,
+    /// The rate the memory controller is running at this instant, in MT/s.
+    ///
+    /// Different from [`MemoryMetrics::speed_mhz`], which firmware reports once at boot: this
+    /// one moves, because the controller clocks down when nothing is asking of it.
+    pub live_mts: Option<f32>,
     // There is no power field here and there will not be one: consumer platforms expose no
     // power sensor for memory, not in SPD, not in SMBIOS, not in hwmon.
 }

@@ -79,6 +79,7 @@ struct Smoothing {
     gpu_power: Option<Smoothed>,
     vram_used: Option<Smoothed>,
     ram_used: Option<Smoothed>,
+    ram_rate: Option<Smoothed>,
     fps: Option<Smoothed>,
     frametime: Option<Smoothed>,
     low_1pct: Option<Smoothed>,
@@ -183,6 +184,13 @@ impl HudState {
             animate,
         );
 
+        track(
+            &mut self.smooth.ram_rate,
+            snapshot.memory.live_mts,
+            tau,
+            animate,
+        );
+
         let frames = snapshot.frames.as_ref();
         track(&mut self.smooth.fps, frames.map(|f| f.fps), tau, animate);
         track(
@@ -262,6 +270,7 @@ impl HudState {
         s.gpu.power = with_provenance(self.sample.gpu.power, read(&self.smooth.gpu_power));
         s.gpu.vram_used_bytes = read(&self.smooth.vram_used).map(|v| v.max(0.0) as u64);
         s.memory.used_bytes = read(&self.smooth.ram_used).map(|v| v.max(0.0) as u64);
+        s.memory.live_mts = read(&self.smooth.ram_rate);
 
         if let Some(f) = &mut s.frames {
             if let Some(v) = read(&self.smooth.fps) {
@@ -421,6 +430,7 @@ impl Smoothing {
             self.gpu_power.as_mut(),
             self.vram_used.as_mut(),
             self.ram_used.as_mut(),
+            self.ram_rate.as_mut(),
             self.fps.as_mut(),
             self.frametime.as_mut(),
             self.low_1pct.as_mut(),

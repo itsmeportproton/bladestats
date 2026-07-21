@@ -151,6 +151,23 @@ impl Sampler for AdlSampler {
             into.cpu.power = Some(Power::Measured(w));
         }
 
+        // And the live memory rate, from the same place and for the same reason: the memory
+        // controller is on the processor package, so what the integrated adapter calls its
+        // memory clock is the system memory's.
+        //
+        // This one was written off in the config as having "no documented user-mode path",
+        // which was true of every path anybody had looked for. Doubled because the reading is
+        // the clock and memory is quoted at twice it — the double data rate the DDR is named
+        // for. Checked against firmware on this machine: 2900 read here, 5800 configured.
+        if let Some(index) = self.package_index
+            && let Some(mhz) = first_of(&self.readout, &[sensor::CLK_MEMCLK], |m| {
+                (100..=20_000).contains(&m).then_some(m as f32)
+            })
+        {
+            let _ = index;
+            into.memory.live_mts = Some(mhz * 2.0);
+        }
+
         if !self.adl.sensors(self.adapter_index, &mut self.readout) {
             return;
         }

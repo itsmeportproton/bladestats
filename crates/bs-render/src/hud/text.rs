@@ -71,9 +71,14 @@ pub fn fraction(used: Option<u64>, total: Option<u64>) -> Option<f32> {
 }
 
 /// `DDR5-5800`, the way a memory kit is named on its own box.
-pub fn memory_name(kind: Option<&str>, rated_mhz: Option<u32>) -> Option<String> {
-    match (kind, rated_mhz) {
-        (Some(k), Some(r)) => Some(format!("{k}-{r}")),
+///
+/// Named after what it is *running* at, not what it is rated for. With a profile enabled those
+/// differ, and the rated figure is the lower of the two — the JEDEC speed the kit is guaranteed
+/// at with no profile. A heading reading "DDR5-4800" over memory running at 5800 would be
+/// technically sourced and plainly wrong.
+pub fn memory_name(kind: Option<&str>, speed_mhz: Option<u32>) -> Option<String> {
+    match (kind, speed_mhz) {
+        (Some(k), Some(s)) => Some(format!("{k}-{s}")),
         (Some(k), None) => Some(k.to_string()),
         _ => None,
     }
