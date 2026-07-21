@@ -47,6 +47,7 @@ impl Corner {
 #[serde(default)]
 pub struct Placement {
     pub corner: Corner,
+    pub orientation: Orientation,
     /// Gap from the screen edge, in pixels.
     pub margin: f32,
     pub font_size: f32,
@@ -58,9 +59,36 @@ impl Default for Placement {
     fn default() -> Self {
         Self {
             corner: Corner::TopLeft,
+            orientation: Orientation::Vertical,
             margin: 32.0,
             font_size: 16.0,
             refresh_hz: 10,
+        }
+    }
+}
+
+/// Which way the panel runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Orientation {
+    /// Sections stacked, each with its bars and its spec line. The full panel.
+    #[default]
+    Vertical,
+    /// One line across the top or bottom of the screen.
+    ///
+    /// Deliberately shows less. Bars, the per-core strip and the memory spec line are all
+    /// shapes that need height, and squeezing them into a strip makes them illegible rather
+    /// than compact — so a horizontal panel carries the readings and leaves the rest out.
+    Horizontal,
+}
+
+impl Orientation {
+    pub const ALL: [Orientation; 2] = [Orientation::Vertical, Orientation::Horizontal];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Orientation::Vertical => "Vertical",
+            Orientation::Horizontal => "Horizontal",
         }
     }
 }

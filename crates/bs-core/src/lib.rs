@@ -14,7 +14,7 @@ pub mod theme;
 
 pub use config::{
     Behaviour, Config, Corner, CpuTempSource as CpuTempChoice, Experimental, Hotkeys, LoadOutcome,
-    Metrics, Placement, Sensors,
+    Metrics, Orientation, Placement, Sensors,
 };
 pub use frames::{FrameMetrics, FrameTimeline};
 pub use gamewatch::{GameWatch, Presence};

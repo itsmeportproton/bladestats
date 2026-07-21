@@ -123,6 +123,10 @@ pub struct HudState {
 impl HudState {
     pub fn new(config: Config, style: HudStyle, motion: Motion) -> Self {
         let reveal = Spring::new(COLLAPSED, motion.reveal);
+        let style = HudStyle {
+            horizontal: config.placement.orientation == bs_core::Orientation::Horizontal,
+            ..style
+        };
         Self {
             motion,
             style,
@@ -142,6 +146,8 @@ impl HudState {
     }
 
     pub fn set_config(&mut self, config: Config) {
+        self.style.horizontal =
+            config.placement.orientation == bs_core::Orientation::Horizontal;
         self.config = config;
     }
 
@@ -360,10 +366,19 @@ impl HudState {
         // below that line is still painted and simply never reaches the screen: the swapchain
         // is the window, so the rasteriser does the clipping for free, and rolling the panel
         // open costs nothing beyond the geometry that was going to be drawn anyway.
+        // Opened along the axis the panel runs: a stack unrolls downwards, a strip runs out
+        // from its middle in both directions, which is what the window's own width does for it.
         let reveal = self.reveal.value().clamp(0.0, 1.0);
-        let size = HudSize {
-            width: self.width.value().round(),
-            height: (self.height.value() * reveal).round().max(1.0),
+        let size = if self.style.horizontal {
+            HudSize {
+                width: (self.width.value() * reveal).round().max(1.0),
+                height: self.height.value().round(),
+            }
+        } else {
+            HudSize {
+                width: self.width.value().round(),
+                height: (self.height.value() * reveal).round().max(1.0),
+            }
         };
 
         self.list.clear();

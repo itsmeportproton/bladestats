@@ -42,6 +42,8 @@ pub struct HudStyle {
     pub core_spacing: f32,
     pub spec_gap: f32,
     pub min_width: f32,
+    /// Lay the blocks out as one line rather than as a stack.
+    pub horizontal: bool,
 }
 
 impl Default for HudStyle {
@@ -63,6 +65,7 @@ impl Default for HudStyle {
             core_spacing: 2.0,
             spec_gap: 3.0,
             min_width: 240.0,
+            horizontal: false,
         }
     }
 }
@@ -102,6 +105,7 @@ impl<'a> Metrics<'a> {
             core_spacing: (style.core_spacing * k).round().max(1.0),
             spec_gap: style.spec_gap * k,
             min_width: style.min_width * k,
+            horizontal: style.horizontal,
         };
         Self { atlas, s }
     }
@@ -176,8 +180,61 @@ impl<'a> Metrics<'a> {
     }
 }
 
+/// The readings of one block, laid end to end for the horizontal panel.
+///
+/// Only the readouts. Bars, the per-core strip and the memory spec line are shapes that need
+/// height, and squeezing them into a strip would make them illegible rather than compact — so
+/// a horizontal panel carries the numbers and leaves the rest to the vertical one.
+fn readout_cells(block: &Block) -> impl Iterator<Item = &Cell> {
+    block.rows.iter().flat_map(|row| match row {
+        Row::Readout { cells, .. } => cells.as_slice(),
+        _ => &[],
+    })
+}
+
+/// How wide one block is when it is a run rather than a stack.
+fn strip_width(block: &Block, m: &Metrics<'_>) -> f32 {
+    let key = m
+        .atlas
+        .face(TextStyle::Key)
+        .measure_spaced(block.key, m.s.key_spacing);
+    let cells: f32 = readout_cells(block).map(|c| m.cell_width(c)).sum();
+    let gaps = m.s.cell_gap * readout_cells(block).count() as f32;
+    key + gaps + cells
+}
+
+/// How large a horizontal panel has to be.
+fn measure_strip(model: &HudModel, atlas: &Atlas, style: &HudStyle) -> HudSize {
+    let m = Metrics::new(atlas, style);
+    let mut width = m.s.pad_x * 2.0;
+
+    for (i, block) in model.blocks.iter().enumerate() {
+        if i > 0 {
+            width += m.s.cell_gap * 2.0 + 1.0; // the divider and the air either side of it
+        }
+        width += strip_width(block, &m);
+    }
+    if let Some(notice) = &model.notice {
+        width += m.s.cell_gap * 2.0 + atlas.face(TextStyle::Small).measure(notice);
+    }
+
+    // One line of the tallest face in play, which is the readouts rather than the frame rate:
+    // a strip is meant to sit under a screen edge, not to carry a headline.
+    let line = atlas
+        .face(TextStyle::Readout)
+        .line_height
+        .max(atlas.face(TextStyle::Key).line_height);
+    HudSize {
+        width: width.ceil(),
+        height: (line + m.s.block_pad_y * 2.0).ceil(),
+    }
+}
+
 /// How large the panel has to be for this model.
 pub fn measure(model: &HudModel, atlas: &Atlas, style: &HudStyle) -> HudSize {
+    if style.horizontal {
+        return measure_strip(model, atlas, style);
+    }
     let m = Metrics::new(atlas, style);
 
     let mut content = m.s.min_width - m.s.pad_x * 2.0;
@@ -227,6 +284,11 @@ pub fn paint(
     // The backing plate is sized independently of the layout so that the panel can roll open
     // and shut: the contents stay where they belong while the box around them grows.
     let (pw, ph) = (plate.width, plate.height);
+
+    if style.horizontal {
+        paint_strip(list, model, atlas, theme, &m, size, plate);
+        return;
+    }
 
     // Border first, then the fill inset by a pixel over the top of it: what remains visible is
     // a one-pixel ring, and it costs one extra rounded rectangle rather than a stroke path.
@@ -476,5 +538,86 @@ fn paint_cores(
         let x = left + i as f32 * pitch;
         let filled = (load.clamp(0.0, 1.0) * height).max(floor);
         list.rect(atlas, x, top + height - filled, width, filled, tint);
+    }
+}
+
+/// The horizontal panel: every block on one line, divided by upright rules.
+///
+/// The plate is drawn where the window is and the contents are laid out from the settled
+/// width, exactly as the vertical panel does — but the plate is *centred* on the settled
+/// layout rather than sharing its left edge, so that opening and closing runs out from the
+/// middle in both directions instead of unrolling from one end.
+#[allow(clippy::too_many_arguments)]
+fn paint_strip(
+    list: &mut DrawList,
+    model: &HudModel,
+    atlas: &Atlas,
+    theme: &Theme,
+    m: &Metrics<'_>,
+    size: HudSize,
+    plate: HudSize,
+) {
+    let inset = (size.width - plate.width) * 0.5;
+    list.rounded_rect(atlas, inset, 0.0, plate.width, plate.height, BORDER);
+    list.rounded_rect(
+        atlas,
+        inset + 1.0,
+        1.0,
+        plate.width - 2.0,
+        plate.height - 2.0,
+        theme.background,
+    );
+
+    // One baseline for the whole strip. Everything on it is a reading, so they share a line
+    // the way words in a sentence do.
+    let readout = atlas.face(TextStyle::Readout);
+    let baseline = m.s.block_pad_y + readout.ascent.max(atlas.face(TextStyle::Key).ascent);
+    let mut pen = m.s.pad_x;
+
+    for (i, block) in model.blocks.iter().enumerate() {
+        if i > 0 {
+            pen += m.s.cell_gap;
+            // An upright rule where the stacked panel would put a horizontal one.
+            let x = pen.round();
+            list.rect(
+                atlas,
+                x,
+                m.s.block_pad_y * 0.5,
+                1.0,
+                size.height - m.s.block_pad_y,
+                DIVIDER,
+            );
+            pen = x + 1.0 + m.s.cell_gap;
+        }
+
+        let key = atlas.face(TextStyle::Key);
+        list.text_styled(
+            atlas,
+            TextStyle::Key,
+            pen,
+            baseline,
+            block.key,
+            theme.faint,
+            m.s.key_spacing,
+        );
+        pen += key.measure_spaced(block.key, m.s.key_spacing);
+
+        for cell in readout_cells(block) {
+            pen += m.s.cell_gap;
+            pen = paint_cell(list, cell, atlas, theme, pen, baseline);
+        }
+    }
+
+    if let Some(notice) = &model.notice {
+        pen += m.s.cell_gap * 2.0;
+        list.text_styled(
+            atlas,
+            TextStyle::Small,
+            pen,
+            baseline,
+            notice,
+            theme.warn,
+            0.0,
+        );
     }
 }

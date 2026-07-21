@@ -25,10 +25,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Two states side by side: an empty snapshot (how the overlay looks before the first
     // sample) and a populated one. The empty case matters more — it shows that unreadable
     // metrics come out as dashes.
-    for (name, snapshot) in [
-        ("empty", MetricsSnapshot::default()),
-        ("populated", populated()),
+    for (name, snapshot, horizontal) in [
+        ("empty", MetricsSnapshot::default(), false),
+        ("populated", populated(), false),
+        ("horizontal", populated(), true),
     ] {
+        let opts = HudOptions {
+            horizontal,
+            ..opts.clone()
+        };
         let (list, size) = hud::build(&atlas, &snapshot, &config, &opts);
         let (w, h) = (size.width.ceil() as usize, size.height.ceil() as usize);
         let pixels = rasterize(&list, &atlas, w, h);

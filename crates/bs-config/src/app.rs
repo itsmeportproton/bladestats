@@ -709,6 +709,34 @@ impl ConfigApp {
             tint,
         );
 
+        // Which way the panel runs. Two choices, so the same segmented row as the corners.
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(14.0);
+            for orientation in bs_core::Orientation::ALL {
+                let selected = self.config.placement.orientation == orientation;
+                let fill = if selected {
+                    theme::dim(tint, 0.9)
+                } else {
+                    theme::PANEL_HOVER
+                };
+                let text = if selected { theme::GROUND } else { theme::MUTED };
+                let button = egui::Button::new(
+                    egui::RichText::new(orientation.label())
+                        .size(11.0)
+                        .family(FontFamily::Monospace)
+                        .color(text),
+                )
+                .fill(fill)
+                .corner_radius(CornerRadius::same(7));
+
+                if ui.add(button).clicked() && !selected {
+                    self.config.placement.orientation = orientation;
+                    changed = true;
+                }
+            }
+        });
+
         // Where the overlay sits. Four corners, so a segmented row rather than a dropdown:
         // the whole choice is visible at once.
         ui.add_space(4.0);
