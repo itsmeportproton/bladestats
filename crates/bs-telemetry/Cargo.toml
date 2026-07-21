@@ -13,7 +13,10 @@ anyhow.workspace = true
 tracing.workspace = true
 
 [features]
-default = []
+default = ["amd"]
+# AMD backend. atiadlxx.dll is loaded dynamically, so a build with this feature still runs on
+# machines with no Radeon in them — the backend simply does not register.
+amd = []
 # NVIDIA backend. nvml.dll is loaded dynamically regardless, so a build with this feature
 # still runs on machines without NVIDIA hardware — the backend simply does not register.
 nvidia = ["dep:nvml-wrapper"]
@@ -29,6 +32,8 @@ features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
     "Win32_System_Performance",
     "Win32_System_Power",
     "Win32_System_Registry",

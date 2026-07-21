@@ -10,6 +10,11 @@ mod memory;
 pub(crate) mod pdh;
 pub(crate) mod registry;
 
+#[cfg(feature = "amd")]
+mod adl;
+#[cfg(feature = "amd")]
+mod adl_sys;
+
 #[cfg(feature = "nvidia")]
 mod nvml;
 
@@ -26,10 +31,17 @@ pub fn samplers() -> Vec<Box<dyn Sampler>> {
         Box::new(gpu::GpuSampler::new()),
     ];
 
-    // NVML runs after the generic GPU backend and overwrites what it can do better, then adds
-    // temperature, power and clocks that the generic path cannot reach at all.
+    // The vendor backends run after the generic GPU one and add the temperature, power and
+    // clocks it cannot reach at all. Both load their library dynamically, so each simply does
+    // not register on a machine without that make of card — a build carries all of them and
+    // whichever fits wakes up.
     #[cfg(feature = "nvidia")]
     if let Some(sampler) = nvml::NvmlSampler::new() {
+        samplers.push(Box::new(sampler));
+    }
+
+    #[cfg(feature = "amd")]
+    if let Some(sampler) = adl::AdlSampler::new(gpu::primary_pci()) {
         samplers.push(Box::new(sampler));
     }
 

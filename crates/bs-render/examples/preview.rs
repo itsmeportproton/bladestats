@@ -127,7 +127,12 @@ fn populated() -> MetricsSnapshot {
         vram_used_bytes: Some(12_025_908_838),
         vram_total_bytes: Some(17_179_869_184),
         temp_c: Some(68.0),
+        hotspot_c: Some(91.0),
+        mem_temp_c: Some(88.0),
         core_clock_mhz: Some(2430.0),
+        mem_clock_mhz: Some(2425.0),
+        fan_rpm: Some(2285.0),
+        fan_pct: Some(72.0),
         power: Some(Power::Measured(231.0)),
     };
     s.memory.used_bytes = Some(19_756_101_632);

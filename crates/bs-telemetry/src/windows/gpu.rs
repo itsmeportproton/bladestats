@@ -144,6 +144,19 @@ struct AdapterDesc {
     vendor: Vendor,
     vram_bytes: u64,
     luid_prefix: String,
+    #[cfg_attr(not(feature = "amd"), allow(dead_code))]
+    pci: super::adl::PciId,
+}
+
+/// Which card the vendor backends should attach themselves to.
+///
+/// Exposed so they follow the choice made here rather than making their own. On a machine with
+/// an integrated Radeon beside a discrete one, two independent "pick the AMD card" heuristics
+/// are two chances to disagree, and the symptom would be an overlay reporting one card's load
+/// beside the other card's temperature.
+#[cfg(feature = "amd")]
+pub(crate) fn primary_pci() -> Option<super::adl::PciId> {
+    primary_adapter().ok().map(|a| a.pci)
 }
 
 /// Picks the adapter the games will actually run on: the one with the most dedicated VRAM.
@@ -175,6 +188,10 @@ fn primary_adapter() -> Result<AdapterDesc> {
                 name,
                 vram_bytes: desc.DedicatedVideoMemory as u64,
                 luid_prefix: luid_prefix(desc.AdapterLuid),
+                pci: super::adl::PciId {
+                    vendor: desc.VendorId as u16,
+                    device: desc.DeviceId as u16,
+                },
             };
 
             if best

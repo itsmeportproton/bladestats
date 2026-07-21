@@ -101,6 +101,10 @@ pub struct Metrics {
     pub gpu_clock: bool,
     pub gpu_vram: bool,
     pub gpu_temp: bool,
+    /// The hottest point on the die, beside the edge reading. Off by default: it is the more
+    /// useful of the two but also the more alarming-looking, and a card is meant to run there.
+    pub gpu_hotspot: bool,
+    pub gpu_fan: bool,
     pub gpu_power: bool,
 
     pub ram_usage: bool,
@@ -130,6 +134,8 @@ impl Default for Metrics {
             gpu_clock: true,
             gpu_vram: true,
             gpu_temp: true,
+            gpu_hotspot: false,
+            gpu_fan: false,
             gpu_power: true,
 
             ram_usage: true,

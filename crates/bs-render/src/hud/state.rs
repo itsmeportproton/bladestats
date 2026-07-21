@@ -74,6 +74,8 @@ struct Smoothing {
     gpu_load: Option<Smoothed>,
     gpu_clock: Option<Smoothed>,
     gpu_temp: Option<Smoothed>,
+    gpu_hotspot: Option<Smoothed>,
+    gpu_fan: Option<Smoothed>,
     gpu_power: Option<Smoothed>,
     vram_used: Option<Smoothed>,
     ram_used: Option<Smoothed>,
@@ -155,6 +157,13 @@ impl HudState {
             animate,
         );
         track(&mut self.smooth.gpu_temp, snapshot.gpu.temp_c, tau, animate);
+        track(
+            &mut self.smooth.gpu_hotspot,
+            snapshot.gpu.hotspot_c,
+            tau,
+            animate,
+        );
+        track(&mut self.smooth.gpu_fan, snapshot.gpu.fan_rpm, tau, animate);
         track(
             &mut self.smooth.gpu_power,
             snapshot.gpu.power.map(Power::watts),
@@ -248,6 +257,8 @@ impl HudState {
         s.gpu.load_pct = read(&self.smooth.gpu_load);
         s.gpu.core_clock_mhz = read(&self.smooth.gpu_clock);
         s.gpu.temp_c = read(&self.smooth.gpu_temp);
+        s.gpu.hotspot_c = read(&self.smooth.gpu_hotspot);
+        s.gpu.fan_rpm = read(&self.smooth.gpu_fan);
         s.gpu.power = with_provenance(self.sample.gpu.power, read(&self.smooth.gpu_power));
         s.gpu.vram_used_bytes = read(&self.smooth.vram_used).map(|v| v.max(0.0) as u64);
         s.memory.used_bytes = read(&self.smooth.ram_used).map(|v| v.max(0.0) as u64);
@@ -405,6 +416,8 @@ impl Smoothing {
             self.gpu_load.as_mut(),
             self.gpu_clock.as_mut(),
             self.gpu_temp.as_mut(),
+            self.gpu_hotspot.as_mut(),
+            self.gpu_fan.as_mut(),
             self.gpu_power.as_mut(),
             self.vram_used.as_mut(),
             self.ram_used.as_mut(),

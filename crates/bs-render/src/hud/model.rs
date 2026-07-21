@@ -359,12 +359,32 @@ fn gpu_block(s: &MetricsSnapshot, config: &Config) -> Option<Block> {
             2,
         ));
     }
+    if m.gpu_hotspot {
+        cells.push(Cell::new(
+            "gpu.hotspot",
+            text::temp(s.gpu.hotspot_c),
+            "°C hot",
+            temp_color(theme, s.gpu.hotspot_c),
+            2,
+        ));
+    }
     if m.gpu_power {
         cells.push(Cell::new(
             "gpu.power",
             text::watts(s.gpu.power),
             " W",
             theme.text,
+            4,
+        ));
+    }
+    if m.gpu_fan {
+        cells.push(Cell::new(
+            "gpu.fan",
+            s.gpu
+                .fan_rpm
+                .map_or(MISSING.into(), |r| format!("{r:.0}")),
+            " rpm",
+            theme.label,
             4,
         ));
     }
@@ -540,6 +560,8 @@ mod tests {
             gpu_clock: true,
             gpu_vram: true,
             gpu_temp: true,
+            gpu_hotspot: true,
+            gpu_fan: true,
             gpu_power: true,
             ram_usage: true,
             ram_spec: true,
@@ -712,6 +734,8 @@ mod tests {
             gpu_clock: false,
             gpu_vram: false,
             gpu_temp: false,
+            gpu_hotspot: false,
+            gpu_fan: false,
             gpu_power: false,
             ram_usage: false,
             ram_spec: false,

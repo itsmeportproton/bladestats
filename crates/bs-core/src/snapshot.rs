@@ -81,8 +81,17 @@ pub struct GpuMetrics {
     pub load_pct: Option<f32>,
     pub vram_used_bytes: Option<u64>,
     pub vram_total_bytes: Option<u64>,
+    /// Edge temperature — the one a card's own software calls "GPU temperature".
     pub temp_c: Option<f32>,
+    /// The hottest point on the die. Runs well above the edge reading and is what a card
+    /// actually throttles against, so on hardware that reports it, it is the more useful of
+    /// the two.
+    pub hotspot_c: Option<f32>,
+    pub mem_temp_c: Option<f32>,
     pub core_clock_mhz: Option<f32>,
+    pub mem_clock_mhz: Option<f32>,
+    pub fan_rpm: Option<f32>,
+    pub fan_pct: Option<f32>,
     pub power: Option<Power>,
 }
 
