@@ -67,7 +67,10 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let opts = HudOptions::default();
 
     let hub = SnapshotHub::new();
-    bs_telemetry::spawn(hub.clone());
+    // The sampler set depends on the settings — a processor temperature is only read when the
+    // user has asked for it — so the thread is given them at birth. Changing that choice takes
+    // a restart of the counter, which the settings window can do with one button.
+    bs_telemetry::spawn(hub.clone(), current.clone());
 
     // Frame timing is optional by design. Without administrator rights the ETW session cannot
     // be created, and the right response is to carry on without a frame rate rather than to

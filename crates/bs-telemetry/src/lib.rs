@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use bs_core::{MetricsSnapshot, SnapshotHub};
+use bs_core::{Config, MetricsSnapshot, SnapshotHub};
 
 #[cfg(windows)]
 mod windows;
@@ -42,13 +42,14 @@ pub trait Sampler {
 ///
 /// Ordering matters: the first backend to fill a field wins, so vendor-specific sources come
 /// before generic ones.
-pub fn samplers() -> Vec<Box<dyn Sampler>> {
+pub fn samplers(config: &Config) -> Vec<Box<dyn Sampler>> {
     #[cfg(windows)]
     {
-        windows::samplers()
+        windows::samplers(config)
     }
     #[cfg(not(windows))]
     {
+        let _ = config;
         // The Linux backends arrive with the sysfs/hwmon stage.
         Vec::new()
     }
@@ -59,9 +60,9 @@ pub fn samplers() -> Vec<Box<dyn Sampler>> {
 /// For callers that want to know what hardware is present without running a loop &mdash; the
 /// configurator colours itself by the detected vendors and needs the answer once, at startup.
 /// Rate-based readings such as load will be absent, since those need two samples to exist.
-pub fn sample_once() -> MetricsSnapshot {
+pub fn sample_once(config: &Config) -> MetricsSnapshot {
     let mut snapshot = MetricsSnapshot::default();
-    for sampler in &mut samplers() {
+    for sampler in &mut samplers(config) {
         sampler.sample(&mut snapshot);
     }
     snapshot
@@ -72,11 +73,11 @@ pub fn sample_once() -> MetricsSnapshot {
 /// The thread owns the samplers; nothing else touches them. It never exits, and it never
 /// propagates a sampling failure — a backend that starts failing simply stops filling its
 /// fields, and the overlay shows dashes.
-pub fn spawn(hub: SnapshotHub) -> std::thread::JoinHandle<()> {
+pub fn spawn(hub: SnapshotHub, config: Config) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("bs-telemetry".into())
         .spawn(move || {
-            let mut samplers = samplers();
+            let mut samplers = samplers(&config);
             for s in &samplers {
                 tracing::info!(backend = s.name(), "telemetry backend active");
             }

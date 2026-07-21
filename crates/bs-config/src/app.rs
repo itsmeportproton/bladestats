@@ -73,7 +73,7 @@ impl ConfigApp {
 
         // One reading, purely to find out what hardware is here. The window colours itself
         // from the answer.
-        let hardware = bs_telemetry::sample_once();
+        let hardware = bs_telemetry::sample_once(&config);
         let cpu_vendor = hardware
             .cpu
             .name

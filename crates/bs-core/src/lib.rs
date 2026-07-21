@@ -13,7 +13,8 @@ pub mod snapshot;
 pub mod theme;
 
 pub use config::{
-    Behaviour, Config, Corner, Experimental, Hotkeys, LoadOutcome, Metrics, Placement,
+    Behaviour, Config, Corner, CpuTempSource as CpuTempChoice, Experimental, Hotkeys, LoadOutcome,
+    Metrics, Placement, Sensors,
 };
 pub use frames::{FrameMetrics, FrameTimeline};
 pub use gamewatch::{GameWatch, Presence};

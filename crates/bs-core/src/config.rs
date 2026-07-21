@@ -192,7 +192,37 @@ pub struct Config {
     pub metrics: Metrics,
     pub experimental: Experimental,
     pub behaviour: Behaviour,
+    pub sensors: Sensors,
     pub hotkeys: Hotkeys,
+}
+
+/// Where the processor's temperature is allowed to come from.
+///
+/// An enumeration rather than a switch, so a signed driver — should this project ever have one
+/// — becomes another variant rather than a settings migration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CpuTempSource {
+    /// Not read at all. The default, and deliberately so: every source involves a program that
+    /// has loaded a kernel driver, and that is the user's decision to make knowingly.
+    #[default]
+    Off,
+    /// Whichever hardware monitor is running and answering.
+    Auto,
+}
+
+/// Readings that need something outside this program.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sensors {
+    pub cpu_temp: CpuTempSource,
+    /// Port LibreHardwareMonitor serves its sensor tree on.
+    #[serde(default = "default_lhm_port")]
+    pub lhm_port: u16,
+}
+
+fn default_lhm_port() -> u16 {
+    8085
 }
 
 /// When the overlay shows itself.
