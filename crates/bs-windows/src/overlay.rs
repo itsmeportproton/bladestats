@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bs_core::{Config, GameWatch, LoadOutcome, Presence, SnapshotHub};
+use bs_core::{Config, GameWatch, LoadOutcome, Orientation, Presence, SnapshotHub};
 use bs_render::{GlyphAtlas, HudOptions};
-use bs_render::hud::{HudState, Motion};
+use bs_render::hud::{HudSize, HudState, Motion};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
@@ -91,9 +91,9 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     // The panel carries its own animation between frames, so it outlives any one of them.
     let mut state = HudState::new(current.clone(), opts, Motion::default());
     state.on_sample((*hub.load()).clone());
-    let (_, size) = state.paint(&atlas);
+    let (_, size, settled) = state.paint(&atlas);
     let (mut w, mut h) = (size.width.ceil() as i32, size.height.ceil() as i32);
-    let (x, y) = window::corner_position(current.placement.corner, current.placement.margin, w, h);
+    let (x, y) = position(&current, w, h, settled);
 
     let overlay = OverlayWindow::new(x, y, w, h)?;
     let mut renderer = Renderer::new(overlay.hwnd, &atlas, w as u32, h as u32)?;
@@ -280,17 +280,12 @@ pub fn run(config_path: PathBuf) -> Result<()> {
 
         if visible && !renderer.is_occluded() && (animating || due) {
             last_draw = Instant::now();
-            let (list, size) = state.paint(&atlas);
+            let (list, size, settled) = state.paint(&atlas);
             let (nw, nh) = (size.width.ceil() as i32, size.height.ceil() as i32);
 
             if (nw, nh) != (w, h) {
                 (w, h) = (nw, nh);
-                let (x, y) = window::corner_position(
-                    current.placement.corner,
-                    current.placement.margin,
-                    w,
-                    h,
-                );
+                let (x, y) = position(&current, w, h, settled);
                 overlay.set_bounds(x, y, w, h);
                 renderer.resize(w as u32, h as u32)?;
             }
@@ -345,6 +340,21 @@ pub fn run(config_path: PathBuf) -> Result<()> {
 /// every poll.
 fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
+}
+
+/// Where the window belongs for a panel this size.
+///
+/// `settled` is the size the panel is heading towards, and it is what a strip has to be placed
+/// against: the two sketches this mode came from show the bar opening outwards from its centre,
+/// which only holds if the centre stays put while the width changes.
+fn position(config: &Config, w: i32, h: i32, settled: HudSize) -> (i32, i32) {
+    let p = &config.placement;
+    match p.orientation {
+        Orientation::Horizontal => {
+            window::strip_position(p.corner, p.margin, w, h, settled.width.ceil() as i32)
+        }
+        Orientation::Vertical => window::corner_position(p.corner, p.margin, w, h),
+    }
 }
 
 fn refresh_interval(config: &Config) -> Duration {

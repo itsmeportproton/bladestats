@@ -221,6 +221,24 @@ pub fn corner_position(corner: Corner, margin: f32, width: i32, height: i32) -> 
     }
 }
 
+/// Screen position for a strip that is part way open.
+///
+/// A stack keeps its corner as it unrolls: it grows along the edge it is already against, and
+/// the corner it is anchored to never moves. A strip does not — it opens from its middle in
+/// both directions. Positioning it from its current width would pin the left edge to the corner
+/// and send only the right one travelling, so the anchor is worked out for the finished panel
+/// and the part-grown window is centred inside it.
+pub fn strip_position(
+    corner: Corner,
+    margin: f32,
+    width: i32,
+    height: i32,
+    settled_width: i32,
+) -> (i32, i32) {
+    let (x, y) = corner_position(corner, margin, settled_width, height);
+    (x + (settled_width - width) / 2, y)
+}
+
 extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {

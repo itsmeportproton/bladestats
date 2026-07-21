@@ -345,10 +345,11 @@ impl HudState {
 
     /// Builds this frame's geometry and reports the box it should be drawn in.
     ///
-    /// The returned size is the animating one, which is why it is returned rather than
-    /// recomputed by the caller: the window is resized to this while the layout inside it is
-    /// already the settled one.
-    pub fn paint(&mut self, atlas: &Atlas) -> (&DrawList, HudSize) {
+    /// Two sizes come back. The first is the animating one the window is resized to; the second
+    /// is the size the panel is heading towards, which the caller needs to place the window: a
+    /// strip opens from its middle, and a middle can only be worked out from where the finished
+    /// panel will sit, not from how much of it exists this frame.
+    pub fn paint(&mut self, atlas: &Atlas) -> (&DrawList, HudSize, HudSize) {
         let mut model = HudModel::new(&self.displayed(), &self.config);
         self.apply_memory(&mut model);
 
@@ -398,7 +399,7 @@ impl HudState {
             // with its bottom sheared off.
             size,
         );
-        (&self.list, size)
+        (&self.list, size, settled)
     }
 
     /// Applies remembered widths, and notices readings that just grew a digit.
@@ -561,7 +562,7 @@ mod tests {
         assert_eq!(displayed.frames.unwrap().fps, 142.0);
 
         // And the panel is already its full size, not growing into it.
-        let (_, size) = s.paint(&atlas);
+        let (_, size, _) = s.paint(&atlas);
         assert!(size.width > 0.0 && size.height > 0.0);
         assert!(!s.step(Duration::from_millis(16)), "nothing to animate yet");
     }
@@ -620,12 +621,12 @@ mod tests {
         let atlas = atlas_or_skip!();
         let mut s = state();
         s.on_sample(with_fps(99.0));
-        let (_, narrow) = s.paint(&atlas);
+        let (_, narrow, _) = s.paint(&atlas);
         let narrow = narrow.width;
 
         s.on_sample(with_fps(142.0));
         drain(&mut s, &atlas, Duration::from_millis(1500));
-        let (_, wide) = s.paint(&atlas);
+        let (_, wide, _) = s.paint(&atlas);
 
         // This is the whole point of reserving character cells. Two digits becoming three used
         // to widen the panel, and a frame rate crossing 100 does that several times a second.
@@ -717,12 +718,12 @@ mod tests {
 
         // Nothing on screen until it is asked for, and the window is safe to take down.
         assert!(s.is_hidden());
-        let (_, closed) = s.paint(&atlas);
+        let (_, closed, _) = s.paint(&atlas);
         assert!(closed.height <= 1.0, "{}", closed.height);
 
         s.set_revealed(true);
         drain(&mut s, &atlas, Duration::from_millis(80));
-        let (_, opening) = s.paint(&atlas);
+        let (_, opening, _) = s.paint(&atlas);
         assert!(
             opening.height > 1.0,
             "it should be on its way open by now: {}",
@@ -731,13 +732,13 @@ mod tests {
         assert!(!s.is_hidden());
 
         drain(&mut s, &atlas, Duration::from_millis(1200));
-        let (_, open) = s.paint(&atlas);
+        let (_, open, _) = s.paint(&atlas);
 
         // Rolling away has to take time too, or there is nothing to see. The window must stay
         // up throughout, which is what `is_hidden` is asked before taking it down.
         s.set_revealed(false);
         drain(&mut s, &atlas, Duration::from_millis(80));
-        let (_, closing) = s.paint(&atlas);
+        let (_, closing, _) = s.paint(&atlas);
         assert!(closing.height < open.height);
         assert!(!s.is_hidden(), "the window is still needed to draw this");
 
@@ -770,6 +771,28 @@ mod tests {
             midway[content..],
             "the contents shifted while the panel was rolling"
         );
+    }
+
+    #[test]
+    fn a_strip_reports_its_finished_width_while_it_is_still_opening() {
+        // The window is placed against this second size, not the first. Without it the strip
+        // would be positioned from its current width, which pins the left edge to the corner
+        // and sends only the right edge travelling — the bar slides out sideways instead of
+        // opening from its middle.
+        let atlas = atlas_or_skip!();
+        let mut config = Config::default();
+        config.placement.orientation = bs_core::Orientation::Horizontal;
+        let mut s = HudState::new(config, HudStyle::default(), Motion::default());
+        s.on_sample(with_fps(142.0));
+        s.set_revealed(true);
+        drain(&mut s, &atlas, Duration::from_millis(1500));
+        let (_, open, _) = s.paint(&atlas);
+
+        s.set_revealed(false);
+        drain(&mut s, &atlas, Duration::from_millis(60));
+        let (_, closing, settled) = s.paint(&atlas);
+        assert!(closing.width < open.width, "it should be closing by now");
+        assert_eq!(settled.width, open.width);
     }
 
     #[test]
