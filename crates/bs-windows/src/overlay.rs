@@ -119,6 +119,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut forced: Option<bool> = None;
     let _hotkeys = hotkeys::Hotkeys::register(&current.hotkeys);
     let mut watched_pid = None;
+    let mut graphics_api = None;
 
     // What this process costs. Reported rather than assumed: the budget is one of the
     // project's headline claims and nothing else here would notice it being broken.
@@ -204,6 +205,14 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 if watched_pid != Some(t.pid) {
                     watched_pid = Some(t.pid);
                     watch.reset();
+                    // Looked up once per game rather than on a timer: a process does not
+                    // change which graphics API it renders with while it is running.
+                    graphics_api = current
+                        .experimental
+                        .graphics_api
+                        .then(|| target::graphics_api(t.pid))
+                        .flatten();
+                    tracing::debug!(pid = t.pid, ?graphics_api, "new target");
                 }
 
                 let was = detected;
@@ -234,6 +243,10 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                     overlay.show(visible);
                     tracing::debug!(mode = ?t.mode, visible, detected, "visibility");
                 }
+
+                // Keyed on the game rather than on whether the panel is up. Forced on at the
+                // desktop, the panel is something to look at with a pointer still in hand.
+                overlay.hide_cursor(detected && visible);
             }
         }
 
@@ -247,6 +260,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
             context.fps = snapshot.frames.as_ref().map(|f| f.fps);
+            snapshot.graphics_api = graphics_api;
             snapshot.notice = notice.clone();
             state.on_sample(snapshot);
         }

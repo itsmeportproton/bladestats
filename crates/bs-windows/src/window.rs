@@ -1,5 +1,7 @@
 //! The overlay window: always on top, transparent to the mouse, never taking focus.
 
+use std::cell::Cell;
+
 use anyhow::{Context, Result};
 use bs_core::Corner;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -16,6 +18,10 @@ const CLASS_NAME: PCWSTR = w!("BladestatsOverlay");
 
 pub struct OverlayWindow {
     pub hwnd: HWND,
+    /// Whether this thread's cursor counter is currently held down. Tracked because
+    /// `ShowCursor` counts rather than sets, and an unbalanced call leaves the desktop with no
+    /// pointer at all.
+    cursor_hidden: Cell<bool>,
 }
 
 impl OverlayWindow {
@@ -77,21 +83,10 @@ impl OverlayWindow {
             )
             .context("CreateWindowExW")?;
 
-            // The cursor's visibility is counted per input queue, not per desktop. A game that
-            // hides its cursor for mouse-look hides it on *its* queue; this thread's counter is
-            // untouched and still says "visible", so the moment the pointer crosses this
-            // window the arrow comes back — in the middle of the game, while the camera is
-            // moving. Hiding it here too makes the two queues agree.
-            //
-            // This is separate from click-through and does not replace it: one decides where a
-            // click lands, the other decides what is drawn under the pointer. Fixing only the
-            // first is what left the arrow showing.
-            //
-            // Safe to do unconditionally: there is nothing on this panel to point at. It takes
-            // no clicks and holds no focus.
-            while ShowCursor(false) >= 0 {}
-
-            Ok(Self { hwnd })
+            Ok(Self {
+                hwnd,
+                cursor_hidden: Cell::new(false),
+            })
         }
     }
 
@@ -150,6 +145,36 @@ impl OverlayWindow {
                 height,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
+        }
+    }
+
+    /// Suppresses the pointer over this window, or gives it back.
+    ///
+    /// Cursor visibility is counted per input queue rather than per desktop. A game hiding its
+    /// cursor for mouse-look hides it on *its* queue; this thread's counter is untouched and
+    /// still says "visible", so the arrow reappears the moment the pointer crosses this
+    /// window — in the middle of the game, while the camera is moving. Driving this thread's
+    /// counter down makes the two agree.
+    ///
+    /// Only while a game is actually on screen. Away from one there is a desktop to use, and
+    /// a panel that swallows the pointer as it passes over is worse than an arrow in a game.
+    ///
+    /// Separate from click-through and no substitute for it: one decides where a click lands,
+    /// the other what is drawn under the pointer.
+    pub fn hide_cursor(&self, hide: bool) {
+        if hide == self.cursor_hidden.get() {
+            return;
+        }
+        self.cursor_hidden.set(hide);
+        unsafe {
+            // The call counts rather than sets, so it is driven to the first value past the
+            // threshold and no further. Overshooting here is how a program leaves somebody
+            // without a pointer until they log out.
+            if hide {
+                while ShowCursor(false) >= 0 {}
+            } else {
+                while ShowCursor(true) < 0 {}
+            }
         }
     }
 
