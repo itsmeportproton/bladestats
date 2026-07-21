@@ -143,7 +143,12 @@ fn run(events: Sender<TrayEvent>, ready: Sender<Option<isize>>, repaint: egui::C
             uID: 1,
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
             uCallbackMessage: WM_TRAY,
-            hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+            // The program's own icon, the same resource the taskbar and Alt-Tab show. Falls
+            // back to the system's if the resource is missing, which happens only on a build
+            // whose resource compiler could not be found.
+            hIcon: LoadIconW(Some(instance.into()), PCWSTR(1 as *const u16))
+                .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+                .unwrap_or_default(),
             ..Default::default()
         };
         let tip: Vec<u16> = "bladestats\0".encode_utf16().collect();

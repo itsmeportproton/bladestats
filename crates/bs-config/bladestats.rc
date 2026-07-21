@@ -1,0 +1,6 @@
+// The application icon.
+//
+// Identifier 1 rather than a name: the shell shows the lowest-numbered icon resource as the
+// program's own, and the notification area asks for this same one by number so that the two
+// cannot drift apart.
+1 ICON "../../assets/icon/bladestats.ico"
