@@ -219,14 +219,19 @@ pub fn paint(
     theme: &Theme,
     style: &HudStyle,
     size: HudSize,
+    plate: HudSize,
 ) {
     let m = Metrics::new(atlas, style);
-    let (w, h) = (size.width, size.height);
+    let w = size.width;
+
+    // The backing plate is sized independently of the layout so that the panel can roll open
+    // and shut: the contents stay where they belong while the box around them grows.
+    let (pw, ph) = (plate.width, plate.height);
 
     // Border first, then the fill inset by a pixel over the top of it: what remains visible is
     // a one-pixel ring, and it costs one extra rounded rectangle rather than a stroke path.
-    list.rounded_rect(atlas, 0.0, 0.0, w, h, BORDER);
-    list.rounded_rect(atlas, 1.0, 1.0, w - 2.0, h - 2.0, theme.background);
+    list.rounded_rect(atlas, 0.0, 0.0, pw, ph, BORDER);
+    list.rounded_rect(atlas, 1.0, 1.0, pw - 2.0, ph - 2.0, theme.background);
 
     let left = m.s.pad_x;
     let right = w - m.s.pad_x;

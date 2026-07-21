@@ -34,11 +34,21 @@ pub const DEFAULT_RESIZE: Duration = Duration::from_millis(200);
 /// How long a newly appeared digit takes to fade in.
 const DIGIT_FADE: Duration = Duration::from_millis(150);
 
+/// How long the panel takes to unroll when a game starts, or roll away when one stops.
+pub const DEFAULT_REVEAL: Duration = Duration::from_millis(320);
+
+/// How much of the panel is left at the far end of rolling away.
+///
+/// Not zero: a box collapsing to a line and vanishing looks like a rendering fault, whereas one
+/// that shrinks to a sliver and then goes reads as deliberate.
+const COLLAPSED: f32 = 0.0;
+
 /// Tuning, so the settings file can reach it without this module knowing about settings.
 #[derive(Debug, Clone)]
 pub struct Motion {
     pub value_tau: Duration,
     pub resize: Duration,
+    pub reveal: Duration,
     /// When off, everything arrives instantly. The accessibility path, and the honest answer
     /// for anyone who simply does not want the panel moving.
     pub enabled: bool,
@@ -49,6 +59,7 @@ impl Default for Motion {
         Self {
             value_tau: DEFAULT_VALUE_TAU,
             resize: DEFAULT_RESIZE,
+            reveal: DEFAULT_REVEAL,
             enabled: true,
         }
     }
@@ -96,6 +107,8 @@ pub struct HudState {
     smooth: Smoothing,
     width: Spring,
     height: Spring,
+    /// How far the panel is unrolled, 0 to 1.
+    reveal: Spring,
     memo: HashMap<&'static str, CellMemo>,
     list: DrawList,
     /// False until the first sample, so readings appear at their values instead of easing in
@@ -109,6 +122,7 @@ pub struct HudState {
 
 impl HudState {
     pub fn new(config: Config, style: HudStyle, motion: Motion) -> Self {
+        let reveal = Spring::new(COLLAPSED, motion.reveal);
         Self {
             motion,
             style,
@@ -117,6 +131,9 @@ impl HudState {
             smooth: Smoothing::default(),
             width: Spring::new(0.0, DEFAULT_RESIZE),
             height: Spring::new(0.0, DEFAULT_RESIZE),
+            // Starts rolled away. The panel arrives by unrolling rather than by appearing,
+            // even on the very first game of a session.
+            reveal,
             memo: HashMap::new(),
             list: DrawList::new(),
             seeded: false,
@@ -130,6 +147,25 @@ impl HudState {
 
     pub fn set_motion(&mut self, motion: Motion) {
         self.motion = motion;
+    }
+
+    /// Asks the panel to unroll or to roll away.
+    ///
+    /// Separate from the window being shown or hidden, and deliberately so: the window has to
+    /// stay up for the whole of the rolling-away, or there would be nothing on screen to
+    /// animate. [`HudState::is_hidden`] says when it is finally safe to take it down.
+    pub fn set_revealed(&mut self, revealed: bool) {
+        let target = if revealed { 1.0 } else { COLLAPSED };
+        if !self.motion.enabled {
+            self.reveal.jump_to(target);
+        } else {
+            self.reveal.set_target(target);
+        }
+    }
+
+    /// Whether the panel has finished rolling away and has nothing left to draw.
+    pub fn is_hidden(&self) -> bool {
+        self.reveal.target() <= COLLAPSED && self.reveal.settled()
     }
 
     pub fn config(&self) -> &Config {
@@ -248,6 +284,7 @@ impl HudState {
         }
         moving |= self.width.step(dt);
         moving |= self.height.step(dt);
+        moving |= self.reveal.step(dt);
         for memo in self.memo.values_mut() {
             moving |= memo.fade.step(dt);
         }
@@ -319,9 +356,14 @@ impl HudState {
             self.height.set_target(settled.height);
         }
 
+        // The window is the full width but only as tall as the panel is unrolled. Everything
+        // below that line is still painted and simply never reaches the screen: the swapchain
+        // is the window, so the rasteriser does the clipping for free, and rolling the panel
+        // open costs nothing beyond the geometry that was going to be drawn anyway.
+        let reveal = self.reveal.value().clamp(0.0, 1.0);
         let size = HudSize {
             width: self.width.value().round(),
-            height: self.height.value().round(),
+            height: (self.height.value() * reveal).round().max(1.0),
         };
 
         self.list.clear();
@@ -336,6 +378,10 @@ impl HudState {
             // frame of a resize, which looks far worse than a panel briefly wider than its
             // contents.
             settled,
+            // ...but the backing plate follows the window, so a half-open panel is a proper
+            // rounded box with its contents sliding out of it, rather than a full-height box
+            // with its bottom sheared off.
+            size,
         );
         (&self.list, size)
     }
@@ -645,6 +691,69 @@ mod tests {
             s.list.vertices.capacity(),
             settled,
             "the draw list is meant to be reused, not reallocated every frame"
+        );
+    }
+
+    #[test]
+    fn the_panel_unrolls_rather_than_appearing_and_rolls_away_before_it_goes() {
+        let atlas = atlas_or_skip!();
+        let mut s = state();
+        s.on_sample(with_fps(142.0));
+
+        // Nothing on screen until it is asked for, and the window is safe to take down.
+        assert!(s.is_hidden());
+        let (_, closed) = s.paint(&atlas);
+        assert!(closed.height <= 1.0, "{}", closed.height);
+
+        s.set_revealed(true);
+        drain(&mut s, &atlas, Duration::from_millis(80));
+        let (_, opening) = s.paint(&atlas);
+        assert!(
+            opening.height > 1.0,
+            "it should be on its way open by now: {}",
+            opening.height
+        );
+        assert!(!s.is_hidden());
+
+        drain(&mut s, &atlas, Duration::from_millis(1200));
+        let (_, open) = s.paint(&atlas);
+
+        // Rolling away has to take time too, or there is nothing to see. The window must stay
+        // up throughout, which is what `is_hidden` is asked before taking it down.
+        s.set_revealed(false);
+        drain(&mut s, &atlas, Duration::from_millis(80));
+        let (_, closing) = s.paint(&atlas);
+        assert!(closing.height < open.height);
+        assert!(!s.is_hidden(), "the window is still needed to draw this");
+
+        drain(&mut s, &atlas, Duration::from_millis(1200));
+        assert!(s.is_hidden(), "and now it is not");
+    }
+
+    #[test]
+    fn the_contents_keep_their_place_while_the_panel_rolls() {
+        // The box moves; the text does not. Laying the contents out against the animating
+        // height would reflow every line on every frame of the animation.
+        let atlas = atlas_or_skip!();
+        let mut s = state();
+        s.on_sample(with_fps(142.0));
+        s.set_revealed(true);
+        drain(&mut s, &atlas, Duration::from_millis(1500));
+
+        let settled: Vec<[f32; 2]> = s.paint(&atlas).0.vertices.iter().map(|v| v.pos).collect();
+
+        s.set_revealed(false);
+        drain(&mut s, &atlas, Duration::from_millis(60));
+        let midway: Vec<[f32; 2]> = s.paint(&atlas).0.vertices.iter().map(|v| v.pos).collect();
+
+        // The backing plate is the first two rounded rectangles — fourteen quads, and those do
+        // move. Everything after them is content and must be untouched.
+        let content = 14 * 4;
+        assert_eq!(settled.len(), midway.len());
+        assert_eq!(
+            settled[content..],
+            midway[content..],
+            "the contents shifted while the panel was rolling"
         );
     }
 

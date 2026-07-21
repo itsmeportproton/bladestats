@@ -41,7 +41,7 @@ pub fn build(
     let model = HudModel::new(snapshot, config);
     let size = paint::measure(&model, atlas, style);
     let mut list = DrawList::new();
-    paint::paint(&mut list, &model, atlas, &config.theme, style, size);
+    paint::paint(&mut list, &model, atlas, &config.theme, style, size, size);
     (list, size)
 }
 

@@ -109,7 +109,10 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut last_topmost = Instant::now();
     let mut last_target = Instant::now() - TARGET_INTERVAL;
     let mut last_config = Instant::now();
+    // Whether the window is up. Lags `wanted_visible` on the way down by however long the
+    // panel takes to roll shut.
     let mut visible = false;
+    let mut wanted_visible = false;
 
     // Whether a game is on screen, and the user's override of that answer. `None` means follow
     // the detection; the override is dropped as soon as the detection changes its mind, so a
@@ -119,7 +122,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut forced: Option<bool> = None;
     let _hotkeys = hotkeys::Hotkeys::register(&current.hotkeys);
     let mut watched_pid = None;
-    let mut graphics_api = None;
+    let mut rendering = target::Rendering::default();
 
     // What this process costs. Reported rather than assumed: the budget is one of the
     // project's headline claims and nothing else here would notice it being broken.
@@ -207,12 +210,8 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                     watch.reset();
                     // Looked up once per game rather than on a timer: a process does not
                     // change which graphics API it renders with while it is running.
-                    graphics_api = current
-                        .experimental
-                        .graphics_api
-                        .then(|| target::graphics_api(t.pid))
-                        .flatten();
-                    tracing::debug!(pid = t.pid, ?graphics_api, "new target");
+                    rendering = target::rendering(t.pid);
+                    tracing::debug!(pid = t.pid, ?rendering, "new target");
                 }
 
                 let was = detected;
@@ -238,10 +237,17 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 let show = wanted && t.overlay_possible();
 
                 context.visible = show;
-                if show != visible {
-                    visible = show;
-                    overlay.show(visible);
-                    tracing::debug!(mode = ?t.mode, visible, detected, "visibility");
+                if show != wanted_visible {
+                    wanted_visible = show;
+                    // The window is not taken down here. It has to stay up for the whole of
+                    // the panel rolling shut, or there would be nothing on screen to animate;
+                    // the loop below hides it once the animation has actually finished.
+                    state.set_revealed(show);
+                    if show {
+                        visible = true;
+                        overlay.show(true);
+                    }
+                    tracing::debug!(mode = ?t.mode, show, detected, "visibility");
                 }
 
                 // Keyed on the game rather than on whether the panel is up. Forced on at the
@@ -260,7 +266,9 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
             context.fps = snapshot.frames.as_ref().map(|f| f.fps);
-            snapshot.graphics_api = graphics_api;
+            snapshot.graphics_api = rendering.api;
+            snapshot.upscaler = rendering.upscaler;
+            snapshot.frame_gen = rendering.frame_gen;
             snapshot.notice = notice.clone();
             state.on_sample(snapshot);
         }
@@ -286,6 +294,13 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 renderer.resize(w as u32, h as u32)?;
             }
             renderer.render(&list)?;
+        }
+
+        // Down only once the rolling has finished, so the last frame of the animation is seen.
+        if visible && !wanted_visible && state.is_hidden() {
+            visible = false;
+            overlay.show(false);
+            overlay.hide_cursor(false);
         }
 
         // Nothing here spins and nothing here sleeps blindly. When the panel is moving the

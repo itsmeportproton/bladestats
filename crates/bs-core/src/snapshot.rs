@@ -19,6 +19,17 @@ pub struct MetricsSnapshot {
     /// Which graphics API the target renders with: `D3D12`, `Vulkan`. Inferred rather than
     /// reported, so it stays `None` whenever the guess would be a guess.
     pub graphics_api: Option<&'static str>,
+    /// The upscaler the game has loaded: `DLSS`, `FSR3`, `XeSS`.
+    ///
+    /// Names what is present, never how much it is scaling by. The ratio lives inside the
+    /// engine and cannot be read from outside it, so there is deliberately no percentage here
+    /// to be tempted into inventing.
+    pub upscaler: Option<&'static str>,
+    /// Frame generation, when it arrives as a library the game loads.
+    ///
+    /// Absence is not proof: driver-level frame generation never enters the game's address
+    /// space, so this stays `None` while it is running.
+    pub frame_gen: Option<&'static str>,
     /// Why something the user expected to see is missing.
     ///
     /// A dash says a value could not be read but not why, and "the frame rate is blank" is
