@@ -53,6 +53,17 @@ pub struct Placement {
     pub font_size: f32,
     /// Redraws per second. Higher costs the game more and reads no better.
     pub refresh_hz: u32,
+    /// Redraws per second while a reading is on the move.
+    ///
+    /// Separate from `refresh_hz`, which is the floor when nothing is happening. Every frame
+    /// the overlay presents makes the desktop compositor rebuild the screen over the game, and
+    /// the panel used to present at the display's full rate for as long as anything was easing
+    /// — a burst twice a second, on every sample. It is text: sixty a second is already more
+    /// than the eye gets from it.
+    ///
+    /// Zero switches motion off altogether. Readings then step at the sampling rate and the
+    /// overlay draws at `refresh_hz`, which is the cheapest it can be while still being live.
+    pub animation_hz: u32,
 }
 
 impl Default for Placement {
@@ -63,6 +74,7 @@ impl Default for Placement {
             margin: 32.0,
             font_size: 16.0,
             refresh_hz: 10,
+            animation_hz: 60,
         }
     }
 }
@@ -103,6 +115,11 @@ impl Placement {
         self.font_size = self.font_size.clamp(8.0, 48.0);
         self.margin = self.margin.clamp(0.0, 512.0);
         self.refresh_hz = self.refresh_hz.clamp(1, 60);
+        // Zero is a setting rather than a mistake — it means no motion at all — so it survives
+        // the clamp that keeps every other value sane.
+        if self.animation_hz != 0 {
+            self.animation_hz = self.animation_hz.clamp(10, 240);
+        }
         self
     }
 }
@@ -455,6 +472,21 @@ mod tests {
             "redrawing faster than the screen costs the game frames for nothing"
         );
         assert!(config.placement.margin >= 0.0);
+    }
+
+    #[test]
+    fn switching_animation_off_survives_the_clamp_that_tidies_every_other_rate() {
+        // Zero means "do not move at all", which is the setting a player reaches for when the
+        // overlay is costing their game frames. Clamping it up to a minimum would quietly
+        // refuse to honour it.
+        let path = temp_dir().join("still.toml");
+        std::fs::write(&path, "[placement]\nanimation_hz = 0\n").unwrap();
+        let (config, _) = Config::load(&path);
+        assert_eq!(config.placement.animation_hz, 0);
+
+        std::fs::write(&path, "[placement]\nanimation_hz = 10000\n").unwrap();
+        let (config, _) = Config::load(&path);
+        assert!(config.placement.animation_hz <= 240);
     }
 
     #[test]

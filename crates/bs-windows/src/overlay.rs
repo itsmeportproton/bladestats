@@ -89,7 +89,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     }
 
     // The panel carries its own animation between frames, so it outlives any one of them.
-    let mut state = HudState::new(current.clone(), opts, Motion::default());
+    let mut state = HudState::new(current.clone(), opts, motion(&current));
     state.on_sample((*hub.load()).clone());
     let (_, size, settled) = state.paint(&atlas);
     let (mut w, mut h) = (size.width.ceil() as i32, size.height.ceil() as i32);
@@ -106,6 +106,11 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     // the changes no animation reports — a device name arriving, a notice appearing, a block
     // switched on in the settings.
     let mut redraw_interval = refresh_interval(&current);
+    // And the ceiling above it: how often the panel may redraw while a reading is easing. The
+    // display used to set that pace, which meant a burst of presents at the monitor's full rate
+    // twice a second, every time a sample landed — and every present over a game costs it a
+    // recomposited desktop.
+    let mut animation_interval = animation_interval(&current);
     let mut last_draw = Instant::now() - redraw_interval;
     let sample_interval = SAMPLE_POLL_INTERVAL;
     let mut last_sample = Instant::now() - sample_interval;
@@ -189,7 +194,9 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 // so dragging a slider in the settings window does not make the readings
                 // re-animate from nothing on every save.
                 state.set_config(current.clone());
+                state.set_motion(motion(&current));
                 redraw_interval = refresh_interval(&current);
+                animation_interval = self::animation_interval(&current);
                 last_draw = Instant::now() - redraw_interval;
             }
         }
@@ -276,9 +283,9 @@ pub fn run(config_path: PathBuf) -> Result<()> {
 
         let dt = last_draw.elapsed();
         let animating = state.step(dt);
-        let due = dt >= redraw_interval;
+        let due = dt >= redraw_interval || (animating && dt >= animation_interval);
 
-        if visible && !renderer.is_occluded() && (animating || due) {
+        if visible && !renderer.is_occluded() && due {
             last_draw = Instant::now();
             let (list, size, settled) = state.paint(&atlas);
             let (nw, nh) = (size.width.ceil() as i32, size.height.ceil() as i32);
@@ -311,6 +318,11 @@ pub fn run(config_path: PathBuf) -> Result<()> {
             remaining(now, last_target, TARGET_INTERVAL),
             remaining(now, last_sample, sample_interval),
             remaining(now, last_draw, redraw_interval),
+            if animating {
+                remaining(now, last_draw, animation_interval)
+            } else {
+                IDLE_WAIT_CAP
+            },
         ]
         .into_iter()
         .min()
@@ -359,6 +371,26 @@ fn position(config: &Config, w: i32, h: i32, settled: HudSize) -> (i32, i32) {
 
 fn refresh_interval(config: &Config) -> Duration {
     Duration::from_secs_f32(1.0 / config.placement.refresh_hz.max(1) as f32)
+}
+
+/// The shortest gap allowed between two redraws while something is easing.
+///
+/// Zero animation means there is nothing to pace, and the floor takes over instead.
+fn animation_interval(config: &Config) -> Duration {
+    match config.placement.animation_hz {
+        0 => refresh_interval(config),
+        hz => Duration::from_secs_f32(1.0 / hz as f32),
+    }
+}
+
+/// How the panel moves, as the settings ask for it.
+fn motion(config: &Config) -> Motion {
+    Motion {
+        // Nothing eases at all when the rate is zero. Readings then step as samples arrive,
+        // which is both the accessibility path and the cheapest the overlay can be over a game.
+        enabled: config.placement.animation_hz != 0,
+        ..Motion::default()
+    }
 }
 
 fn build_atlas(font_size: f32) -> Result<GlyphAtlas> {

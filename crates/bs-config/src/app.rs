@@ -709,6 +709,21 @@ impl ConfigApp {
             tint,
         );
 
+        // The one setting here that trades looks for frames, so it says so.
+        //
+        // Every eased frame is a frame the desktop compositor has to rebuild the screen for,
+        // over the game, and the readings ease twice a second as samples land. Off, the digits
+        // step instead of walking and the overlay draws ten times a second.
+        let mut smooth = self.config.placement.animation_hz != 0;
+        if row(ui, &mut smooth, "Smooth motion", "costs a few frames", tint) {
+            self.config.placement.animation_hz = if smooth {
+                bs_core::Placement::default().animation_hz
+            } else {
+                0
+            };
+            changed = true;
+        }
+
         // Which way the panel runs. Two choices, so the same segmented row as the corners.
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
