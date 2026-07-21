@@ -19,14 +19,14 @@ use crate::counter::Counter;
 use crate::theme::{self, Accents};
 
 /// The window at rest.
-pub const WINDOW_SIZE: [f32; 2] = [580.0, 700.0];
+pub const WINDOW_SIZE: [f32; 2] = [720.0, 740.0];
 
 const RADIUS: u8 = 18;
 const PAD: f32 = 26.0;
 const TITLEBAR_H: f32 = 38.0;
 const HEADER_H: f32 = 82.0;
 const STATUS_H: f32 = 46.0;
-const FEATURES_W: f32 = 252.0;
+const FEATURES_W: f32 = 340.0;
 
 /// The size the panel is designed at, so the slider can read as a percentage of it rather than
 /// as a pixel count nobody has an intuition for.
@@ -69,6 +69,11 @@ pub struct ConfigApp {
     /// somebody who has read it and closed it has answered.
     monitor_offer: Option<MonitorOffer>,
 
+    /// The notification-area icon, when one could be created. `None` means the shell refused,
+    /// and hiding the window would then leave no way back — so the minimise light minimises
+    /// instead.
+    tray: Option<crate::tray::Tray>,
+
     opening: Opening,
     /// Set when a control changes, cleared once the file is written.
     pending_save: Option<Instant>,
@@ -107,6 +112,7 @@ impl ConfigApp {
         .then_some(MonitorOffer::Asking);
 
         Self {
+            tray: crate::tray::Tray::new(cc.egui_ctx.clone()),
             monitor_offer,
             accents: Accents::detect(cpu_vendor, hardware.gpu.vendor),
             cpu_name: hardware
@@ -165,10 +171,20 @@ impl eframe::App for ConfigApp {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    /// The counter goes with the window, whichever way the window was closed.
+    ///
+    /// [`ConfigApp::quit`] covers the two deliberate routes, and this covers the rest: Alt+F4,
+    /// the taskbar's close, a shutdown. Stopping twice is harmless — the second call finds
+    /// nothing running and says so.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.counter.stop();
+    }
+
     /// The given `Ui` arrives with no margin and no background: exactly right here, since the
     /// rounded window shape, its border and its controls are all ours to draw.
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.handle_tray(&ctx);
         self.save_if_due();
 
         // The "saved" notice has to be forgotten once it has been up long enough, not merely
@@ -356,6 +372,31 @@ impl ConfigApp {
         self.monitor_dialog(ui, rect);
     }
 
+    /// Stops the counter and closes the window.
+    ///
+    /// Both, always. The counter is a separate process precisely so it can be small, not so it
+    /// can be hard to get rid of, and a monitor that keeps drawing after its program has been
+    /// quit is a monitor somebody has to hunt for in Task Manager.
+    fn quit(&mut self, ctx: &egui::Context) {
+        self.counter.stop();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Acts on whatever was clicked in the notification area.
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        let Some(event) = self.tray.as_ref().and_then(crate::tray::Tray::poll) else {
+            return;
+        };
+        match event {
+            crate::tray::TrayEvent::Show => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            crate::tray::TrayEvent::Quit => self.quit(ctx),
+        }
+    }
+
     fn title_bar(&mut self, ui: &mut Ui, rect: Rect) {
         // The whole strip drags the window, the way a title bar should.
         let drag = ui.interact(rect, ui.id().with("drag"), Sense::click_and_drag());
@@ -364,19 +405,27 @@ impl ConfigApp {
         }
 
         let y = rect.center().y;
+        // Closing means closing. The counter is a second process and used to outlive this
+        // window, which meant somebody who quit the program still had it drawing over their
+        // games with nothing on screen to stop it.
         if light(ui, Pos2::new(rect.left() + 20.0, y), theme::CLOSE, "Close").clicked() {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            self.quit(ui.ctx());
         }
-        if light(
-            ui,
-            Pos2::new(rect.left() + 40.0, y),
-            theme::MINIMISE,
-            "Minimise",
-        )
-        .clicked()
-        {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+
+        let (tooltip, to_tray) = match self.tray {
+            Some(_) => ("Hide to the notification area", true),
+            None => ("Minimise", false),
+        };
+        if light(ui, Pos2::new(rect.left() + 40.0, y), theme::MINIMISE, tooltip).clicked() {
+            if to_tray {
+                // Hidden rather than minimised: the counter is still running and the icon is
+                // the way back to it.
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            } else {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
         }
     }
 

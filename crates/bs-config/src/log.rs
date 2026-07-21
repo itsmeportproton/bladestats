@@ -21,6 +21,12 @@ pub struct Release {
 /// Newest first, which is the order they are drawn in.
 pub const RELEASES: &[Release] = &[
     Release {
+        version: "0.1.2",
+        date: "2026-07-21",
+        tag: Some("beta"),
+        entries: CURRENT,
+    },
+    Release {
         version: "0.1.1",
         date: "2026-07-21",
         tag: Some("beta"),
@@ -32,6 +38,41 @@ pub const RELEASES: &[Release] = &[
         tag: None,
         entries: FIRST,
     },
+];
+
+const CURRENT: &[(&str, &str, bool)] = &[
+    (
+        "Hides to the notification area.",
+        "The minimise light puts the window away rather than on the taskbar, and the icon \
+         brings it back. Right-click it to quit.",
+        false,
+    ),
+    (
+        "Closing closes everything.",
+        "The counter used to outlive the window it was started from, which left it drawing \
+         over games with nothing on screen to stop it. It now goes when the window does, \
+         including one left running by an earlier session.",
+        false,
+    ),
+    (
+        "Fixed:",
+        "the settings window stuttered whenever the counter was stopped. Every frame it drew \
+         asked the system whether a counter was running, and asking meant starting a whole \
+         process to find out.",
+        true,
+    ),
+    (
+        "Fixed:",
+        "the upscaler reading claimed XeSS in every game. Engines load every upscaler they \
+         ship whether or not one is selected, so which library is loaded says nothing about \
+         which is in use. The reading is gone rather than misleading.",
+        true,
+    ),
+    (
+        "",
+        "A wider window, so the notes and the corner buttons fit in it.",
+        false,
+    ),
 ];
 
 const LATEST: &[(&str, &str, bool)] = &[

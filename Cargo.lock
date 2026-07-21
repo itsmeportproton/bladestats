@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "bs-config"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "bs-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arc-swap",
  "serde",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "bs-render"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ab_glyph",
  "bs-core",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "bs-telemetry"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "bs-core",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "bs-windows"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "arc-swap",

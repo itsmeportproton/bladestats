@@ -10,5 +10,6 @@ pub mod counter;
 pub mod lhm;
 pub mod log;
 pub mod theme;
+pub mod tray;
 
 pub use app::ConfigApp;
