@@ -251,27 +251,6 @@ fn frames_block(s: &MetricsSnapshot, config: &Config, accent: Color) -> Option<B
         }
     }
 
-    // What the game is rendering with, beyond the raw rate. Both readings name what is loaded
-    // and neither claims a quantity: the scaling ratio and the count of generated frames both
-    // live inside the engine, and an overlay outside it can honestly say which is present and
-    // nothing more.
-    let x = &config.experimental;
-    let mut extras = Vec::new();
-    if x.render_scale && let Some(up) = s.upscaler {
-        extras.push(Cell::small("upscaler.label", "up", "", theme.label, 0));
-        extras.push(Cell::small("upscaler", up, "", theme.text, 0));
-    }
-    if x.generated_frames && let Some(fg) = s.frame_gen {
-        extras.push(Cell::small("framegen.label", "gen", "", theme.label, 0));
-        extras.push(Cell::small("framegen", fg, "", theme.text, 0));
-    }
-    if !extras.is_empty() {
-        rows.push(Row::Readout {
-            cells: extras,
-            right_from: None,
-        });
-    }
-
     let name = config
         .experimental
         .graphics_api

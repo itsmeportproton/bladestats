@@ -561,21 +561,11 @@ impl ConfigApp {
                 group(ui, "EXPERIMENTAL", gpu);
                 note(
                     ui,
-                    "Read from what the game has loaded, not from the driver. These name what \
-                     is present and cannot say how much: the scaling ratio and the count of \
-                     generated frames live inside the engine. A dash means not visible, which \
-                     is not the same as off.",
+                    "Inferred rather than read from a driver. Expect these to be wrong \
+                     sometimes, and to break when a driver changes.",
                 );
                 let x = &mut self.config.experimental;
                 changed |= row(ui, &mut x.graphics_api, "Graphics API", "", gpu);
-                changed |= row(
-                    ui,
-                    &mut x.generated_frames,
-                    "Frame generation",
-                    frame_gen(self.gpu_vendor),
-                    gpu,
-                );
-                changed |= row(ui, &mut x.render_scale, "Upscaler", "name only", gpu);
                 changed |= row(ui, &mut x.ram_live_rate, "Live transfer rate", "", chrome);
 
                 group(ui, "APPEARANCE", chrome);
@@ -1000,15 +990,6 @@ fn bullet(ui: &mut Ui, lead: &str, rest: &str, fix: bool) {
             });
         });
     });
-}
-
-fn frame_gen(vendor: Vendor) -> &'static str {
-    match vendor {
-        Vendor::Amd => "AFMF",
-        Vendor::Nvidia => "DLSS-FG",
-        Vendor::Intel => "XeSS-FG",
-        Vendor::Unknown => "",
-    }
 }
 
 /// Uses the overlay's own typeface for anything monospaced, so the two programs agree on what

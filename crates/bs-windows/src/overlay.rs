@@ -125,7 +125,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     let mut forced: Option<bool> = None;
     let _hotkeys = hotkeys::Hotkeys::register(&current.hotkeys);
     let mut watched_pid = None;
-    let mut rendering = target::Rendering::default();
+    let mut graphics_api = None;
 
     // What this process costs. Reported rather than assumed: the budget is one of the
     // project's headline claims and nothing else here would notice it being broken.
@@ -213,8 +213,8 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                     watch.reset();
                     // Looked up once per game rather than on a timer: a process does not
                     // change which graphics API it renders with while it is running.
-                    rendering = target::rendering(t.pid);
-                    tracing::debug!(pid = t.pid, ?rendering, "new target");
+                    graphics_api = target::graphics_api(t.pid);
+                    tracing::debug!(pid = t.pid, ?graphics_api, "new target");
                 }
 
                 let was = detected;
@@ -269,9 +269,7 @@ pub fn run(config_path: PathBuf) -> Result<()> {
                 snapshot.frames = source.metrics(etw::now_ns());
             }
             context.fps = snapshot.frames.as_ref().map(|f| f.fps);
-            snapshot.graphics_api = rendering.api;
-            snapshot.upscaler = rendering.upscaler;
-            snapshot.frame_gen = rendering.frame_gen;
+            snapshot.graphics_api = graphics_api;
             snapshot.notice = notice.clone();
             state.on_sample(snapshot);
         }

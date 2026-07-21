@@ -2,9 +2,6 @@
 **/*.rs.bk
 *.pdb
 
-# The font is fetched by hand rather than stored here (see assets/fonts/README.md).
-/assets/fonts/*.ttf
-
 # Local config used for manual runs
 /bladestats.toml
 

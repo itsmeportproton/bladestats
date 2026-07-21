@@ -153,10 +153,6 @@ impl Default for Metrics {
 pub struct Experimental {
     /// Which graphics API the game renders with.
     pub graphics_api: bool,
-    /// Whether frame generation is running, and how many frames it adds.
-    pub generated_frames: bool,
-    /// Render resolution against output resolution, when the game is upscaling.
-    pub render_scale: bool,
     /// Live memory transfer rate. Needs vendor access that has no documented user-mode path.
     pub ram_live_rate: bool,
 }

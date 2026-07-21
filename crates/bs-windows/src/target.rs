@@ -89,76 +89,7 @@ pub fn current(own_pid: u32) -> Option<Target> {
 /// opened at all — a protected process is not an error, it is a process that keeps its own
 /// counsel.
 pub fn graphics_api(pid: u32) -> Option<&'static str> {
-    rendering(pid).api
-}
-
-/// What a process is rendering with, as far as its loaded libraries reveal.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Rendering {
-    pub api: Option<&'static str>,
-    /// The upscaler in use, when it arrives as a library.
-    pub upscaler: Option<&'static str>,
-    /// Frame generation, likewise.
-    pub frame_gen: Option<&'static str>,
-}
-
-/// Inspects a process once and answers all three questions.
-///
-/// One enumeration rather than three: opening a process and walking its module list is the
-/// expensive half, and the matching afterwards is three passes over a few hundred strings.
-pub fn rendering(pid: u32) -> Rendering {
-    let Some(modules) = loaded_modules(pid) else {
-        return Rendering::default();
-    };
-    Rendering {
-        api: api_from_modules(&modules),
-        upscaler: upscaler_from_modules(&modules),
-        frame_gen: frame_gen_from_modules(&modules),
-    }
-}
-
-/// Which upscaler a game has loaded.
-///
-/// **This says what is loaded, not what is switched on, and it cannot say by how much.** The
-/// ratio of render resolution to output resolution lives inside the engine; reading it would
-/// mean being inside the process, which this program is built not to be. So the reading is
-/// named rather than measured, and two families are invisible to it entirely: FSR compiled
-/// into an engine rather than shipped beside it, and driver-side upscaling — Radeon Super
-/// Resolution, NVIDIA's own scaling — which never enters the game's address space at all.
-fn upscaler_from_modules(modules: &[String]) -> Option<&'static str> {
-    const UPSCALERS: [(&str, &str); 7] = [
-        ("nvngx_dlss.dll", "DLSS"),
-        ("libxess.dll", "XeSS"),
-        ("libxess_dx11.dll", "XeSS"),
-        ("ffx_fsr3upscaler_x64.dll", "FSR3"),
-        ("ffx_fsr2_api_x64.dll", "FSR2"),
-        ("amd_fidelityfx_dx12.dll", "FSR"),
-        ("amd_fidelityfx_vk.dll", "FSR"),
-    ];
-    matching(modules, &UPSCALERS)
-}
-
-/// Whether frame generation is loaded, and whose.
-///
-/// Same caveat as above, and one more: the count of generated frames is not obtainable from
-/// outside either. AMD's driver-level frame generation leaves no trace in the game's modules
-/// at all, so silence here does not mean none.
-fn frame_gen_from_modules(modules: &[String]) -> Option<&'static str> {
-    const GENERATORS: [(&str, &str); 4] = [
-        ("nvngx_dlssg.dll", "DLSS-G"),
-        ("ffx_frameinterpolation_x64.dll", "FSR3 FG"),
-        ("ffx_opticalflow_x64.dll", "FSR3 FG"),
-        // A widely used replacement that presents itself as NVIDIA's and is not.
-        ("dlssg_to_fsr3_amd_is_better.dll", "FSR3 FG"),
-    ];
-    matching(modules, &GENERATORS)
-}
-
-fn matching(modules: &[String], table: &[(&str, &'static str)]) -> Option<&'static str> {
-    table
-        .iter()
-        .find(|(dll, _)| modules.iter().any(|m| m == dll))
-        .map(|(_, name)| *name)
+    api_from_modules(&loaded_modules(pid)?)
 }
 
 /// The ranking itself, separated so the ordering can be tested without a process to inspect.
@@ -360,56 +291,6 @@ mod tests {
             api_from_modules(&modules(&["kernel32.dll", "user32.dll"])),
             None
         );
-    }
-
-    #[test]
-    fn an_upscaler_is_named_when_it_ships_as_a_library() {
-        assert_eq!(
-            upscaler_from_modules(&modules(&["d3d12.dll", "nvngx_dlss.dll"])),
-            Some("DLSS")
-        );
-        assert_eq!(
-            upscaler_from_modules(&modules(&["ffx_fsr3upscaler_x64.dll"])),
-            Some("FSR3")
-        );
-        assert_eq!(upscaler_from_modules(&modules(&["libxess.dll"])), Some("XeSS"));
-    }
-
-    #[test]
-    fn an_engine_that_compiled_its_upscaler_in_reports_nothing() {
-        // The honest outcome, and the reason this reading is named rather than measured.
-        // FSR built into an engine leaves no library behind, and driver-side upscaling never
-        // enters the game's address space at all. A dash here does not mean "off".
-        assert_eq!(
-            upscaler_from_modules(&modules(&["d3d12.dll", "dxgi.dll"])),
-            None
-        );
-    }
-
-    #[test]
-    fn frame_generation_is_named_including_the_replacement_that_poses_as_another() {
-        assert_eq!(
-            frame_gen_from_modules(&modules(&["nvngx_dlssg.dll"])),
-            Some("DLSS-G")
-        );
-        // Presents itself under NVIDIA's name and is not NVIDIA's.
-        assert_eq!(
-            frame_gen_from_modules(&modules(&["dlssg_to_fsr3_amd_is_better.dll"])),
-            Some("FSR3 FG")
-        );
-        assert_eq!(frame_gen_from_modules(&modules(&["nvngx_dlss.dll"])), None);
-    }
-
-    #[test]
-    fn upscaling_and_generation_are_told_apart() {
-        // The two ship side by side and their libraries differ by two letters. Confusing them
-        // would report frame generation on every game merely using DLSS.
-        let both = modules(&["nvngx_dlss.dll", "nvngx_dlssg.dll", "d3d12.dll"]);
-        assert_eq!(upscaler_from_modules(&both), Some("DLSS"));
-        assert_eq!(frame_gen_from_modules(&both), Some("DLSS-G"));
-
-        let upscaling_only = modules(&["nvngx_dlss.dll", "d3d12.dll"]);
-        assert_eq!(frame_gen_from_modules(&upscaling_only), None);
     }
 
     #[test]

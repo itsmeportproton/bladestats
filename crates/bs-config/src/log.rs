@@ -145,7 +145,7 @@ pub const LIMITS: &[&str] = &[
     "Processor temperature needs a hardware monitor running. It is the one reading with no \
      path that avoids a kernel driver, and bladestats ships none.",
     "Intel graphics temperature and power are not read yet. AMD and NVIDIA are.",
-    "The upscaler and frame generation are named, never measured. How much either is doing \
-     lives inside the engine, and a dash means not visible rather than off.",
+    "The upscaler and frame generation are not reported. Which one a game has loaded says \
+     nothing about which one it is using, and there is no way to tell from outside it.",
     "Memory power is never shown. Consumer boards have no sensor for it.",
 ];

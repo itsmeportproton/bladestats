@@ -1,28 +1,14 @@
-# Fonts
+# JetBrains Mono
 
-bladestats renders text through its own glyph atlas rather than through the system's text engine.
-One file is required:
+`JetBrainsMono-Regular.ttf` is committed here and compiled into the binary. Nothing to fetch,
+nothing to install — a clone builds.
 
-    JetBrainsMono-Regular.ttf
+bladestats rasterises it into its own glyph atlas rather than going through the system's text
+engine, which is why one file is enough and why no font needs to be installed on the machine
+that runs it.
 
-It is **not stored in the repository** — binary assets bloat git history, and the licence lets
-you fetch it yourself.
+Licensed under the SIL Open Font License 1.1. The licence permits redistribution, including
+inside a binary, provided its text travels with it — that is
+[LICENSE-JetBrainsMono.txt](LICENSE-JetBrainsMono.txt), and it must accompany any build.
 
-## Where to get it
-
-Official releases: <https://github.com/JetBrains/JetBrainsMono/releases>
-
-Two files from the archive go into this directory:
-
-- `JetBrainsMono-Regular.ttf` — the font itself;
-- `OFL.txt` from the archive, renamed to `LICENSE-JetBrainsMono.txt`.
-
-## Why this font
-
-Monospaced, so digits do not shift as values change — the single most important property for a
-monitor that updates ten times a second.
-
-The licence is the SIL Open Font License 1.1 (versions before 2.0 were Apache-2.0; they are
-not any more). OFL permits embedding the font in a binary and redistributing it with no fees
-attached, but requires the licence text to travel with it — which is why
-`LICENSE-JetBrainsMono.txt` is committed even though the `.ttf` is not.
+Upstream: https://github.com/JetBrains/JetBrainsMono

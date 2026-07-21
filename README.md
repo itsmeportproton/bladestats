@@ -9,8 +9,7 @@ no account.
 
 ## What it shows
 
-**Frames** — FPS, frame time, 1% and 0.1% lows, the graphics API, the upscaler and frame
-generation when a game has them loaded.
+**Frames** — FPS, frame time, 1% and 0.1% lows, and the graphics API.
 
 **Processor** — load and clock per core, package power, temperature.
 
