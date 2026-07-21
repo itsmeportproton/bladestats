@@ -21,26 +21,47 @@ pub struct Release {
 /// Newest first, which is the order they are drawn in.
 pub const RELEASES: &[Release] = &[
     Release {
+        version: "0.1.3",
+        date: "2026-07-21",
+        tag: Some("beta"),
+        entries: V0_1_3,
+    },
+    Release {
         version: "0.1.2",
         date: "2026-07-21",
         tag: Some("beta"),
-        entries: CURRENT,
+        entries: V0_1_2,
     },
     Release {
         version: "0.1.1",
         date: "2026-07-21",
         tag: Some("beta"),
-        entries: LATEST,
+        entries: V0_1_1,
     },
     Release {
         version: "0.1.0",
         date: "2026-07-20",
         tag: None,
-        entries: FIRST,
+        entries: V0_1_0,
     },
 ];
 
-const CURRENT: &[(&str, &str, bool)] = &[
+// Named for the version they belong to rather than for how recent they are, because "current"
+// and "latest" stop being true the moment a release is added above them.
+
+const V0_1_3: &[(&str, &str, bool)] = &[
+    (
+        "A panel that lies across the screen.",
+        "One bar with every reading in a row, the way MangoHud lays one out, chosen beside \
+         the corner buttons in the settings. It opens outwards from its middle and folds back \
+         into it. The core bars, the memory bars and the specification line stay behind in \
+         this mode — they are columns by nature and have nowhere to go in a single line.",
+        false,
+    ),
+    ("", "The program has an icon of its own.", false),
+];
+
+const V0_1_2: &[(&str, &str, bool)] = &[
     (
         "Hides to the notification area.",
         "The minimise light puts the window away rather than on the taskbar, and the icon \
@@ -75,7 +96,7 @@ const CURRENT: &[(&str, &str, bool)] = &[
     ),
 ];
 
-const LATEST: &[(&str, &str, bool)] = &[
+const V0_1_1: &[(&str, &str, bool)] = &[
     (
         "Radeon sensors.",
         "Temperature, hotspot, board power, clocks and fan, read from the driver's own \
@@ -127,7 +148,7 @@ const LATEST: &[(&str, &str, bool)] = &[
     ),
 ];
 
-const FIRST: &[(&str, &str, bool)] = &[
+const V0_1_0: &[(&str, &str, bool)] = &[
     (
         "Frame timing without injection.",
         "FPS, frame time and low percentiles read from the graphics kernel's own events. \
