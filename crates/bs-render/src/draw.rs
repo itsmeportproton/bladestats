@@ -15,7 +15,7 @@ pub struct Vertex {
     /// Pixels, origin at the overlay's top-left.
     pub pos: [f32; 2],
     pub uv: [f32; 2],
-    /// Premultiplied alpha — the form both a D3D11 composition swapchain and Vulkan expect.
+    /// Premultiplied alpha — the form a D3D11 composition swapchain expects.
     pub color: [f32; 4],
 }
 

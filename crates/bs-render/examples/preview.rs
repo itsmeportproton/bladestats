@@ -1,6 +1,6 @@
 //! Software preview of the overlay: renders the HUD to a PNG with no graphics API involved.
 //!
-//! Useful for checking layout, font and colours by eye without bringing up D3D11 or Vulkan,
+//! Useful for checking layout, font and colours by eye without bringing up D3D11,
 //! and for having something to compare against when the on-screen result looks wrong. A
 //! debugging tool; it is not part of any release.
 //!

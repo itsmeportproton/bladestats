@@ -1,8 +1,8 @@
-//! Platform-independent core of bladestats.
+//! The core of bladestats.
 //!
-//! No Win32, no Vulkan, no sysfs here — only metric types, frame timing arithmetic, theme and
-//! config. Everything that knows about a specific OS lives in `bs-telemetry`, `bs-windows` and
-//! `bs-linux-layer`, and talks to the core through [`MetricsSnapshot`].
+//! No Win32 here — only metric types, frame timing arithmetic, theme and config. Everything
+//! that touches the system lives in `bs-telemetry` and `bs-windows`, and talks to the core
+//! through [`MetricsSnapshot`].
 
 pub mod config;
 pub mod frames;

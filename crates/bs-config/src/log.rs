@@ -3,9 +3,38 @@
 //! Written from the reader's side of the screen rather than from the commit log: "frame timing
 //! without injection" rather than the provider and keyword that made it work.
 
-/// `(lead-in, rest, is a fix)`. The lead-in is set brighter, so a list of changes can be
-/// skimmed by what each one is about.
-pub const ENTRIES: &[(&str, &str, bool)] = &[
+/// One release, with the entries it brought.
+///
+/// Grouped rather than kept as one flat list because the window draws a version and a date
+/// above each group. Flat, every entry would sit under whatever version happened to be current,
+/// and the nine that shipped first would be relabelled with every release after them.
+pub struct Release {
+    pub version: &'static str,
+    pub date: &'static str,
+    /// Drawn beside the version. `None` for a plain release.
+    pub tag: Option<&'static str>,
+    /// `(lead-in, rest, is a fix)`. The lead-in is set brighter, so a list of changes can be
+    /// skimmed by what each one is about.
+    pub entries: &'static [(&'static str, &'static str, bool)],
+}
+
+/// Newest first, which is the order they are drawn in.
+pub const RELEASES: &[Release] = &[
+    Release {
+        version: "0.1.1",
+        date: "2026-07-21",
+        tag: Some("beta"),
+        entries: LATEST,
+    },
+    Release {
+        version: "0.1.0",
+        date: "2026-07-20",
+        tag: None,
+        entries: FIRST,
+    },
+];
+
+const LATEST: &[(&str, &str, bool)] = &[
     (
         "Radeon sensors.",
         "Temperature, hotspot, board power, clocks and fan, read from the driver's own \
@@ -55,6 +84,9 @@ pub const ENTRIES: &[(&str, &str, bool)] = &[
          form it can take, so 99 becoming 100 fills a space that was already there.",
         true,
     ),
+];
+
+const FIRST: &[(&str, &str, bool)] = &[
     (
         "Frame timing without injection.",
         "FPS, frame time and low percentiles read from the graphics kernel's own events. \

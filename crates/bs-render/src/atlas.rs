@@ -1,9 +1,8 @@
 //! Glyph atlas: the font is rasterised once at startup into a single coverage texture.
 //!
-//! This is what lets Windows and Linux draw text identically — the platform receives finished
-//! vertices and knows nothing about DirectWrite or any text engine at all. The price is no
-//! hinting and no subpixel antialiasing; for an overlay of monospaced digits that is a fine
-//! trade, whereas the two platforms looking different would not be.
+//! The renderer receives finished vertices and knows nothing about DirectWrite or any text
+//! engine at all. The price is no hinting and no subpixel antialiasing; for an overlay of
+//! monospaced digits that is a fine trade.
 //!
 //! The overlay draws at five sizes — a small letterspaced block key, units, device names, the
 //! readouts and the large frame rate — and all five live in **one** texture, packed side by

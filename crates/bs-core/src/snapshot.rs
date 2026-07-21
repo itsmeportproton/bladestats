@@ -46,7 +46,7 @@ pub struct MetricsSnapshot {
 /// from a real sensor reading.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Power {
-    /// Read from a sensor: NVML, RAPL, hwmon.
+    /// Read from a sensor rather than derived from a model.
     Measured(f32),
     /// Derived from a model. Drawn with a tilde: `~65 W`.
     Estimated(f32),
@@ -66,7 +66,7 @@ impl Power {
 
 #[derive(Debug, Clone, Default)]
 pub struct CpuMetrics {
-    /// The exact model string, as Device Manager or `/proc/cpuinfo` reports it.
+    /// The exact model string, as Device Manager reports it.
     pub name: Option<String>,
     /// One entry per logical core, in the order the OS numbers them.
     pub cores: Vec<CoreMetrics>,
@@ -127,7 +127,7 @@ pub struct MemoryMetrics {
     /// one moves, because the controller clocks down when nothing is asking of it.
     pub live_mts: Option<f32>,
     // There is no power field here and there will not be one: consumer platforms expose no
-    // power sensor for memory, not in SPD, not in SMBIOS, not in hwmon.
+    // power sensor for memory, not in SPD and not in SMBIOS.
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -151,7 +151,7 @@ impl Vendor {
     }
 
     /// Crude name matching, for sources that only hand over a string: DXGI adapter
-    /// descriptions, `/proc/cpuinfo` and the like.
+    /// descriptions and the like.
     pub fn from_name(name: &str) -> Self {
         let n = name.to_ascii_lowercase();
         if n.contains("nvidia") || n.contains("geforce") || n.contains("quadro") {

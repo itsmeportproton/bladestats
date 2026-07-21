@@ -462,7 +462,7 @@ impl ConfigApp {
         p.text(
             chip.center(),
             Align2::CENTER_CENTER,
-            "PRE-RELEASE",
+            "BETA",
             FontId::new(9.0, FontFamily::Monospace),
             self.accents.chrome.ink,
         );
@@ -720,23 +720,37 @@ impl ConfigApp {
             .show(&mut child, |ui| {
                 ui.spacing_mut().item_spacing.y = 7.0;
 
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(env!("CARGO_PKG_VERSION"))
-                            .family(FontFamily::Monospace)
-                            .size(12.0)
-                            .color(theme::TEXT),
-                    );
-                    ui.label(
-                        egui::RichText::new("2026-07-20")
-                            .family(FontFamily::Monospace)
-                            .size(10.0)
-                            .color(theme::FAINT),
-                    );
-                });
+                // A heading per release rather than one for the whole list. The date lives
+                // beside the entries it describes, so the two cannot drift apart the way a
+                // date written into this function once did.
+                for release in crate::log::RELEASES {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(release.version)
+                                .family(FontFamily::Monospace)
+                                .size(12.0)
+                                .color(theme::TEXT),
+                        );
+                        if let Some(tag) = release.tag {
+                            ui.label(
+                                egui::RichText::new(tag)
+                                    .family(FontFamily::Monospace)
+                                    .size(10.0)
+                                    .color(theme::WARN),
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new(release.date)
+                                .family(FontFamily::Monospace)
+                                .size(10.0)
+                                .color(theme::FAINT),
+                        );
+                    });
 
-                for (lead, rest, fix) in crate::log::ENTRIES {
-                    bullet(ui, lead, rest, *fix);
+                    for (lead, rest, fix) in release.entries {
+                        bullet(ui, lead, rest, *fix);
+                    }
+                    ui.add_space(6.0);
                 }
             });
     }

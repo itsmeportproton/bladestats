@@ -1,6 +1,6 @@
 # Fonts
 
-bladestats renders text through its own glyph atlas so that Windows and Linux look identical.
+bladestats renders text through its own glyph atlas rather than through the system's text engine.
 One file is required:
 
     JetBrainsMono-Regular.ttf

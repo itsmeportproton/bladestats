@@ -50,7 +50,6 @@ pub fn samplers(config: &Config) -> Vec<Box<dyn Sampler>> {
     #[cfg(not(windows))]
     {
         let _ = config;
-        // The Linux backends arrive with the sysfs/hwmon stage.
         Vec::new()
     }
 }

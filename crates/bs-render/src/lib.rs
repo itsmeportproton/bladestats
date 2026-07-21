@@ -1,9 +1,9 @@
-//! Shared overlay rendering: font rasterisation into a glyph atlas, and turning a snapshot
-//! into a list of textured quads.
+//! Overlay rendering: font rasterisation into a glyph atlas, and turning a snapshot into a
+//! list of textured quads.
 //!
-//! The platform receives finished vertices and only uploads them to its own graphics API —
-//! D3D11 on Windows, Vulkan on Linux. That is what makes the overlay pixel-identical on both,
-//! which would not happen with DirectWrite on one side and Vulkan text on the other.
+//! The renderer receives finished vertices and only uploads them to D3D11. Nothing here knows
+//! about DirectWrite or any text engine — the atlas is rasterised by hand, which is what keeps
+//! the layout code free of the graphics API entirely.
 
 pub mod atlas;
 pub mod draw;

@@ -1,7 +1,7 @@
 //! Sharing the snapshot between threads.
 //!
 //! There are three writers and readers: the telemetry sampler (slow, ~500 ms), the frame source
-//! (fast, an ETW or Vulkan layer callback) and the renderer (10–20 Hz). The renderer must never
+//! (fast, an ETW callback) and the renderer (10–20 Hz). The renderer must never
 //! wait on anyone, so the handoff goes through [`arc_swap`] rather than a mutex: readers grab a
 //! pointer, writers publish a whole new snapshot.
 

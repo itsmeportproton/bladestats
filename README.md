@@ -1,107 +1,60 @@
 # bladestats
 
-A lightweight, free, open-source, portable hardware monitor and FPS overlay for Windows 10/11
-and Linux.
+A hardware monitor and FPS overlay for Windows 10/11. One executable, no installer, no service,
+no account.
 
-No installer, no service, no account, no telemetry. A single executable that draws your CPU,
-GPU, memory and frame rate on top of a game and otherwise stays out of the way.
+![The overlay](docs/overlay.gif)
 
-**Status: work in progress.** The overlay, hardware telemetry and frame timing all work on
-Windows. Configuration is still hard-coded, AMD and Intel GPU sensors are not read yet, and
-the Linux side does not exist.
-
-## Design constraints
-
-These are load-bearing, not preferences. Everything else in the project follows from them.
-
-**On Windows, nothing is injected into the game.** No DLL is loaded into the target process, no
-`Present` hook is installed, no foreign memory is read. Frame timing comes from ETW, the
-tracing facility built into Windows. To an anti-cheat, bladestats is an ordinary window plus a
-system trace.
-
-The cost is that the overlay only works in borderless ("fullscreen windowed") mode. Drawing on
-top of someone else's swapchain in exclusive fullscreen is not possible without a hook, so
-bladestats detects that mode and hides instead.
-
-**On Linux the mechanism is different.** There is no equivalent of ETW, so frame timing comes
-from a Vulkan layer (`VK_LAYER_bladestats_overlay`). A Vulkan layer is code running inside the
-game process. That is a real difference from the Windows side, and it is stated here rather
-than glossed over.
-
-**Overhead is the headline metric.** An overlay that costs frames defeats its own purpose, so
-it is measured rather than assumed. On an idle desktop, release build:
-
-| | Measured | Goal |
-|---|---|---|
-| CPU, no frame timing | 0.05% of one core | under 1% |
-| CPU, with frame timing | 0.23% of one core | under 1% |
-| Private memory | 36 MB | under 30 MB — **not met** |
-| Binary | 1.2 MB | — |
-
-Frame timing costs about four times the rest of the overlay put together. That is the price of
-running an ETW session at all: the events are filtered down by the kernel — 891,000 raw events
-became 2,770 without changing the result — yet the session infrastructure itself dominates
-what remains.
-
-The memory goal is currently missed. Most of the footprint is the graphics stack the overlay
-has to load in order to draw at all — D3D11, DXGI and the display driver account for the bulk
-of the 61 modules in the process. Whether that can be brought down without giving up
-GPU-composited rendering is an open question, not a solved one.
+![The settings window](docs/settings.png)
 
 ## What it shows
 
-- FPS, frame time, 1% and 0.1% lows — for both D3D and Vulkan titles
-- CPU: load and clock **per core**, plus the exact model name
-- GPU: load, VRAM, temperature, clocks, power draw, exact model name
-- Memory: used/total and configured speed
-- Power draw wherever a real sensor exists
+**Frames** — FPS, frame time, 1% and 0.1% lows, the graphics API, the upscaler and frame
+generation when a game has them loaded.
 
-### About power readings
+**Processor** — load and clock per core, package power, temperature.
 
-| | Windows | Linux |
-|---|---|---|
-| GPU | yes (NVML; AMD/Intel later via ADLX/IGCL) | yes (hwmon) |
-| CPU | **estimate**, always marked with a tilde: `~65 W` | yes (RAPL) |
-| Memory | no | no |
+**Graphics** — load, VRAM, temperature, hotspot, core and memory clocks, board power, fan speed.
 
-CPU package power on Windows can only be read from MSRs, which requires a kernel-mode driver.
-Drivers of that kind (WinRing0 and relatives) appear in Microsoft's vulnerable-driver blocklist
-and are flagged by anti-cheats — that single component would carry more risk than the whole of
-the rest of bladestats. So Windows shows a figure derived from load, clocks and TDP, and it is
-always marked as an estimate.
+**Memory** — used and total, generation and speed, module sizes, live transfer rate.
 
-Memory power is not shown at all. Consumer platforms have no power sensor for RAM, in SPD, in
-SMBIOS or in hwmon. Rather than invent a plausible number, bladestats shows capacity, speed and
-timings and leaves it at that.
+Anything that cannot be read is drawn as a dash rather than a zero.
 
-The same principle runs through the whole UI: a metric that could not be read is drawn as a
-dash, never as a zero.
+## What it needs
 
-## Building and running
+- Windows 10 or 11.
+- Administrator rights for the frame counter. Without them everything else still works and the
+  frame rate shows a dash.
+- The game in borderless windowed mode. Exclusive fullscreen cannot be drawn over, and the
+  overlay hides itself there.
+- An AMD or NVIDIA graphics card for temperature and power. Intel is not read yet.
+- Processor temperature needs LibreHardwareMonitor. The settings window offers to fetch it.
+
+## Building
 
 ```sh
 cargo build --release
 ```
 
-The font file is not stored in the repository — see
-[assets/fonts/README.md](assets/fonts/README.md).
+The font is not stored in the repository — see [assets/fonts/README.md](assets/fonts/README.md).
 
-**Frame timing needs administrator rights**, because creating a real-time ETW session is a
-privileged operation. Started without them, bladestats runs anyway and shows a dash where the
-frame rate would be; everything else works unelevated.
+## Running
 
-Two flags help when something looks wrong:
+```sh
+bladestats.exe                  # settings window plus the counter
+bladestats.exe --counter        # the counter alone
+bladestats.exe --counter --profile=cost.csv   # and log what it costs
+```
 
-- `--demo` fills the overlay with fabricated metrics, for checking appearance without hardware
-  access;
-- `--etw-selftest` points frame timing at bladestats itself. Its own present rate is known
-  exactly, so the reported figure can be checked against a number the program controls rather
-  than against a guess.
+`Ctrl+Alt+B` shows or hides the overlay. `Ctrl+Alt+R` re-reads the settings.
+
+Settings live in `bladestats.toml` next to the executable and are applied about a second after
+they change.
 
 ## Licence
 
 Code is MIT, see [LICENSE](LICENSE).
 
-JetBrains Mono is distributed under the SIL Open Font License 1.1. Its text lives next to the
-font in [assets/fonts/LICENSE-JetBrainsMono.txt](assets/fonts/LICENSE-JetBrainsMono.txt) and
-must accompany any build that embeds it.
+JetBrains Mono is under the SIL Open Font License 1.1. Its text lives next to the font in
+[assets/fonts/LICENSE-JetBrainsMono.txt](assets/fonts/LICENSE-JetBrainsMono.txt) and must
+accompany any build that embeds it.

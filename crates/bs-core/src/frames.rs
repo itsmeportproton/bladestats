@@ -1,9 +1,8 @@
 //! Frame timing: FPS, frame time and low percentiles derived from a stream of present
 //! timestamps.
 //!
-//! The timestamps are platform-specific (ETW on Windows, a Vulkan layer on Linux) but the
-//! arithmetic is shared and lives here — it is also the one part of the project that unit
-//! tests can cover properly.
+//! The timestamps come from ETW and the arithmetic lives here — it is also the one part of
+//! the project that unit tests can cover properly.
 
 use std::collections::VecDeque;
 

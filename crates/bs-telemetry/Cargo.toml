@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Hardware telemetry: sampler traits and the Windows and Linux backends"
+description = "Hardware telemetry: sampler traits and the Windows backends"
 
 [dependencies]
 bs-core.workspace = true

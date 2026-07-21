@@ -7,14 +7,13 @@ members = [
     "crates/bs-telemetry",
     "crates/bs-windows",
 ]
-# bs-linux-layer joins the members list at its own stage.
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/bladestats/bladestats"
+repository = "https://github.com/itsmeportproton/bladestats"
 
 [workspace.dependencies]
 bs-core = { path = "crates/bs-core" }

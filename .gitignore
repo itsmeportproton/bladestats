@@ -7,3 +7,8 @@
 
 # Local config used for manual runs
 /bladestats.toml
+
+# The HTML mockup the native settings window replaced, and the editor's launch config for it.
+# Both are development leftovers rather than anything a reader needs.
+/design
+/.claude

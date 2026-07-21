@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Glyph atlas and overlay layout, shared between Windows and Linux"
+description = "Glyph atlas and overlay layout"
 
 [dependencies]
 bs-core.workspace = true
@@ -13,7 +13,7 @@ ab_glyph.workspace = true
 
 [dev-dependencies]
 # Only for the `preview` example, which software-rasterises the draw list to a PNG so the
-# layout can be checked by eye without bringing up D3D11 or Vulkan.
+# layout can be checked by eye without bringing up D3D11.
 png = "0.18"
 
 [features]

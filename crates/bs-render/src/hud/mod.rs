@@ -1,7 +1,6 @@
 //! Overlay layout: the snapshot becomes blocks, the blocks become geometry.
 //!
-//! The layout is shared by both platforms. Metrics that could not be read are drawn as a dash
-//! rather than a zero — a direct consequence of the `Option` convention in `bs-core`: the user
+//! Metrics that could not be read are drawn as a dash rather than a zero — a direct consequence of the `Option` convention in `bs-core`: the user
 //! must be able to tell "zero watts" from "no sensor".
 //!
 //! Three layers, and the split is what keeps any of it testable. [`model`] decides what the

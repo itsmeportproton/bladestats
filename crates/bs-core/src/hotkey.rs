@@ -13,8 +13,7 @@ pub struct Hotkey {
     pub alt: bool,
     pub shift: bool,
     pub win: bool,
-    /// Windows virtual-key code. Plain enough to be worth carrying across platforms as a
-    /// number: on Linux the layer maps it back to a keysym.
+    /// Windows virtual-key code.
     pub key: u16,
 }
 

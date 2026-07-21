@@ -1,5 +1,5 @@
-# The project also builds on Linux, so the repository always stores LF regardless of which
-# machine a commit came from. Shell scripts and Vulkan layer manifests break on CRLF.
+# The repository always stores LF, so a commit made on one machine does not show up as a
+# whole-file change on another.
 * text=auto eol=lf
 
 *.ttf binary

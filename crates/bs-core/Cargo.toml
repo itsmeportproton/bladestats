@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Platform-independent core of bladestats: metrics, frame timing, config, theme"
+description = "The core of bladestats: metrics, frame timing, config, theme"
 
 [dependencies]
 arc-swap.workspace = true

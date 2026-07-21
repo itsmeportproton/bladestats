@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 /// A colour with straight (non-premultiplied) alpha.
 ///
-/// Premultiplication happens at the boundary with the graphics API — both a D3D11 composition
-/// swapchain and Vulkan blending expect premultiplied values — but straight alpha is easier to
-/// store and to configure.
+/// Premultiplication happens at the boundary with the graphics API — a D3D11 composition
+/// swapchain expects premultiplied values — but straight alpha is easier to store and to
+/// configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub struct Color {
