@@ -25,15 +25,21 @@ pub(crate) struct PciId {
 pub struct AdlSampler {
     adl: Adl,
     adapter_index: c_int,
+    /// The processor's own integrated graphics, when it has some.
+    ///
+    /// Read for one field and one only: on a desktop Ryzen the integrated part shares a
+    /// package with the cores, so what ADL calls its ASIC power is the *processor's* power.
+    /// Everything else about it belongs to a graphics adapter nobody is rendering with.
+    package_index: Option<c_int>,
     /// Reused between samples. Two kilobytes is not much, but rebuilding it twice a second
     /// for the lifetime of a game is pointless work.
     readout: Box<PmLogDataOutput>,
 }
 
 impl AdlSampler {
-    /// Opens ADL and settles on which adapter to report, or returns `None` when there is no
-    /// Radeon here to report on.
-    pub fn new(target: Option<PciId>) -> Option<Self> {
+    /// Opens ADL and settles on which adapters to read, or returns `None` when there is no
+    /// Radeon here to read at all.
+    pub fn new(target: Option<PciId>, integrated: Option<PciId>) -> Option<Self> {
         let adl = Adl::load()?;
         let adapters = adl.adapters();
         if adapters.is_empty() {
@@ -49,9 +55,25 @@ impl AdlSampler {
             "AMD sensors"
         );
 
+        // Only when it is genuinely a different adapter. On a machine whose only graphics are
+        // integrated, the card being reported on and the package are the same thing, and its
+        // ASIC power is then the graphics figure rather than the processor's.
+        let package_index = integrated
+            .filter(|id| Some(*id) != target)
+            .and_then(|id| {
+                adapters
+                    .iter()
+                    .find(|a| a.present != 0 && a.exist != 0 && parse_pci(&a.pnp()) == Some(id))
+            })
+            .map(|a| {
+                tracing::info!(index = a.adapter_index, pnp = %a.pnp(), "processor power");
+                a.adapter_index
+            });
+
         Some(Self {
             adl,
             adapter_index: chosen.adapter_index,
+            package_index,
             readout: Box::default(),
         })
     }
@@ -112,6 +134,23 @@ impl Sampler for AdlSampler {
     }
 
     fn sample(&mut self, into: &mut MetricsSnapshot) {
+        // The processor first, because the card's readout overwrites the buffer.
+        //
+        // This replaces a model with a measurement. The figure that was here before came from
+        // a guessed thermal envelope raised to a power of load — the right shape and no
+        // relation to what the machine was actually drawing. Verified by loading every core
+        // and watching: 33W idle, 125W saturated, while the graphics block sat at its idle
+        // clock throughout, which is what says the reading covers the package and not the
+        // graphics.
+        if let Some(index) = self.package_index
+            && self.adl.sensors(index, &mut self.readout)
+            && let Some(w) = first_of(&self.readout, &[sensor::ASIC_POWER], |w| {
+                (1..=500).contains(&w).then_some(w as f32)
+            })
+        {
+            into.cpu.power = Some(Power::Measured(w));
+        }
+
         if !self.adl.sensors(self.adapter_index, &mut self.readout) {
             return;
         }
@@ -326,6 +365,117 @@ mod tests {
         }
     }
 
+    /// Asks whether the integrated Radeon's sensors are really the processor's.
+    ///
+    /// On a desktop Ryzen the integrated graphics sit on the same die as the cores, so what ADL
+    /// calls the ASIC may be the whole package — which would mean processor power and
+    /// temperature are readable here, with no kernel driver and no third-party program. That
+    /// would be a considerable thing to be right about, and an embarrassing thing to be wrong
+    /// about, so it is settled by loading the cores and watching rather than by reasoning.
+    #[test]
+    #[ignore = "diagnostic: run with --ignored --nocapture, takes ~15s and loads every core"]
+    fn does_the_integrated_adapter_report_the_processor() {
+        let Some(adl) = Adl::load() else {
+            eprintln!("no ADL on this machine");
+            return;
+        };
+        // The integrated part is the one the primary-card matching deliberately avoids.
+        let discrete = super::super::gpu::primary_pci();
+        let adapters = adl.adapters();
+        let Some(integrated) = adapters
+            .iter()
+            .filter(|a| a.present != 0 && a.exist != 0)
+            .find(|a| parse_pci(&a.pnp()) != discrete)
+        else {
+            eprintln!("no integrated adapter beside the discrete one");
+            return;
+        };
+
+        let read = |label: &str| {
+            let mut out = Box::<PmLogDataOutput>::default();
+            if !adl.sensors(integrated.adapter_index, &mut out) {
+                eprintln!("{label}: query failed");
+                return;
+            }
+            eprintln!(
+                "{label:>6}: asic[23]={:?}W soc[17]={:?}W gfx[30]={:?}W  gfx_t[28]={:?}C soc_t[29]={:?}C  gfxclk[1]={:?}",
+                out.get(sensor::ASIC_POWER),
+                out.get(17),
+                out.get(sensor::GFX_POWER),
+                out.get(sensor::TEMPERATURE_GFX),
+                out.get(29),
+                out.get(sensor::CLK_GFXCLK),
+            );
+        };
+
+        eprintln!("adapter {} — {}", integrated.adapter_index, integrated.pnp());
+        read("idle");
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        read("idle");
+
+        // Every logical core, busy, for long enough that package power has to respond.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let threads: Vec<_> = (0..std::thread::available_parallelism().map_or(8, |n| n.get()))
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        std::hint::black_box(x);
+                    }
+                })
+            })
+            .collect();
+
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        read("LOADED");
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        read("LOADED");
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for t in threads {
+            let _ = t.join();
+        }
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        read("after");
+    }
+
+    /// Checks that the processor's wattage is a reading and not the old model.
+    ///
+    /// The estimate it replaced produced a smooth curve from a guessed thermal envelope, which
+    /// looked entirely reasonable and bore no relation to the machine. The distinguishing
+    /// property of the real thing is that it is marked as measured.
+    #[test]
+    fn processor_power_arrives_as_a_measurement_where_the_hardware_allows_it() {
+        let Some(mut sampler) = AdlSampler::new(
+            super::super::gpu::primary_pci(),
+            super::super::gpu::integrated_pci(),
+        ) else {
+            eprintln!("skipped: no AMD adapter on this machine");
+            return;
+        };
+        if sampler.package_index.is_none() {
+            eprintln!("skipped: no integrated Radeon to read the package through");
+            return;
+        }
+
+        let mut snapshot = MetricsSnapshot::default();
+        sampler.sample(&mut snapshot);
+
+        let power = snapshot.cpu.power.expect("the package reports its power");
+        assert!(
+            !power.is_estimated(),
+            "this path exists to replace the estimate, not to dress it up"
+        );
+        assert!(
+            (5.0..=400.0).contains(&power.watts()),
+            "implausible package power: {}",
+            power.watts()
+        );
+        eprintln!("processor package: {} W", power.watts());
+    }
+
     /// Reads this machine's own card, when there is one. Skips everywhere else, in the same
     /// spirit as the memory backend's test against real firmware.
     #[test]
@@ -333,7 +483,7 @@ mod tests {
         // Through the same choice the rest of the program makes. Passing `None` here once
         // silently tested the integrated Radeon instead of the card in the slot, which is
         // exactly the confusion `choose` exists to prevent.
-        let Some(mut sampler) = AdlSampler::new(super::super::gpu::primary_pci()) else {
+        let Some(mut sampler) = AdlSampler::new(super::super::gpu::primary_pci(), super::super::gpu::integrated_pci()) else {
             eprintln!("skipped: no AMD adapter on this machine");
             return;
         };

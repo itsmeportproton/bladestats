@@ -159,14 +159,43 @@ pub(crate) fn primary_pci() -> Option<super::adl::PciId> {
     primary_adapter().ok().map(|a| a.pci)
 }
 
+/// The graphics built into the processor, when there is some and it is AMD's.
+///
+/// Worth finding for a reason that has nothing to do with graphics: on a desktop Ryzen the
+/// integrated part shares a package with the cores, so its "ASIC power" is the *processor's*
+/// power — a real measurement where there would otherwise only be a model.
+///
+/// Identified by dedicated memory rather than by name or device ID. Integrated graphics have
+/// none to speak of; they borrow system memory. That distinguishes them from a second discrete
+/// card, which would report its own board power and would be entirely the wrong number.
+#[cfg(feature = "amd")]
+pub(crate) fn integrated_pci() -> Option<super::adl::PciId> {
+    /// Below this much dedicated memory, a graphics adapter is not a card in a slot.
+    const DEDICATED_CUTOFF: u64 = 512 * 1024 * 1024;
+
+    all_adapters()
+        .ok()?
+        .into_iter()
+        .find(|a| a.vendor == Vendor::Amd && a.vram_bytes < DEDICATED_CUTOFF)
+        .map(|a| a.pci)
+}
+
 /// Picks the adapter the games will actually run on: the one with the most dedicated VRAM.
 ///
 /// A laptop reports both its integrated and discrete GPUs, and software adapters (the
 /// Microsoft Basic Render Driver, WARP) show up too and must be skipped.
 fn primary_adapter() -> Result<AdapterDesc> {
+    all_adapters()?
+        .into_iter()
+        .max_by_key(|a| a.vram_bytes)
+        .ok_or_else(|| anyhow!("no hardware DXGI adapter found"))
+}
+
+/// Every real graphics adapter in the machine, in the order DXGI lists them.
+fn all_adapters() -> Result<Vec<AdapterDesc>> {
     unsafe {
         let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
-        let mut best: Option<AdapterDesc> = None;
+        let mut found = Vec::new();
 
         for index in 0.. {
             let Ok(adapter) = factory.EnumAdapters1(index) else {
@@ -194,15 +223,10 @@ fn primary_adapter() -> Result<AdapterDesc> {
                 },
             };
 
-            if best
-                .as_ref()
-                .is_none_or(|b| candidate.vram_bytes > b.vram_bytes)
-            {
-                best = Some(candidate);
-            }
+            found.push(candidate);
         }
 
-        best.ok_or_else(|| anyhow!("no hardware DXGI adapter found"))
+        Ok(found)
     }
 }
 

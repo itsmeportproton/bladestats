@@ -41,7 +41,7 @@ pub fn samplers() -> Vec<Box<dyn Sampler>> {
     }
 
     #[cfg(feature = "amd")]
-    if let Some(sampler) = adl::AdlSampler::new(gpu::primary_pci()) {
+    if let Some(sampler) = adl::AdlSampler::new(gpu::primary_pci(), gpu::integrated_pci()) {
         samplers.push(Box::new(sampler));
     }
 
