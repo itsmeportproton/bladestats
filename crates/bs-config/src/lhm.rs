@@ -25,7 +25,12 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Pinned to the project's own repository and to https. Following "latest" rather than a
 /// version means one fewer thing to go stale, at the cost of not knowing in advance exactly
 /// what arrives — which is why what arrives is checked before it is run.
-const RELEASE_URL: &str = "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/latest/download/LibreHardwareMonitor-net472.zip";
+///
+/// The plain name and not `LibreHardwareMonitor.NET.10.zip`, which is the same program built
+/// against a runtime that has to be installed separately. This one runs on the framework every
+/// Windows 10 and 11 already has, which for a program fetched to take one reading is the
+/// difference between working and starting a second installation.
+const RELEASE_URL: &str = "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/latest/download/LibreHardwareMonitor.zip";
 
 /// A release is a few megabytes. Anything far outside that is not one.
 const MIN_BYTES: u64 = 512 * 1024;
@@ -259,6 +264,16 @@ mod tests {
         // repository, and to a scheme that authenticates it.
         assert!(RELEASE_URL.starts_with("https://github.com/LibreHardwareMonitor/"));
         assert!(!RELEASE_URL.contains("http://"));
+    }
+
+    #[test]
+    fn the_asset_is_one_that_needs_no_second_installation() {
+        // The first spelling of this was invented rather than looked up and returned 404. The
+        // real releases are LibreHardwareMonitor.zip and LibreHardwareMonitor.NET.10.zip; the
+        // latter needs a runtime installed separately, which for a program fetched to take one
+        // reading is the difference between working and starting again somewhere else.
+        assert!(RELEASE_URL.ends_with("/LibreHardwareMonitor.zip"));
+        assert!(!RELEASE_URL.contains("NET.10"));
     }
 
     #[test]

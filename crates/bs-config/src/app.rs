@@ -772,32 +772,34 @@ impl ConfigApp {
         );
 
         // Right: whether the last change reached disk. Somebody who just clicked something
-        // wants to know it landed.
-        let (text, colour) = match (&self.save_error, self.pending_save, self.saved_at) {
-            (Some(e), _, _) => (format!("not saved: {e}"), theme::BAD),
-            (None, Some(_), _) => ("saving...".into(), theme::FAINT),
+        // wants to know it landed. When there is nothing to report the space is left empty
+        // rather than filled — the button sits there, and a line of prose behind a button is
+        // just a collision.
+        let saved = match (&self.save_error, self.pending_save, self.saved_at) {
+            (Some(e), _, _) => Some((format!("not saved: {e}"), theme::BAD)),
+            (None, Some(_), _) => Some(("saving...".to_string(), theme::FAINT)),
             (None, None, Some(at)) if at.elapsed() < SAVED_NOTICE => {
-                ("saved".to_string(), theme::MUTED)
+                Some(("saved".to_string(), theme::MUTED))
             }
-            // Nothing pending, so the space says the one thing about this window that is not
-            // obvious: closing it does not take the counter with it.
-            _ => ("close: counter keeps running".into(), theme::FAINT),
+            _ => None,
         };
-        p.text(
-            Pos2::new(rect.right() - PAD, y),
-            Align2::RIGHT_CENTER,
-            text,
-            mono,
-            colour,
-        );
+        if let Some((text, colour)) = saved {
+            p.text(
+                Pos2::new(rect.right() - PAD - 110.0, y),
+                Align2::RIGHT_CENTER,
+                text,
+                mono,
+                colour,
+            );
+        }
 
         // Starting and stopping the counter needs somewhere to live, and it is not the red
         // light: that closes this window, which is the common action and must not take the
         // counter with it. One button that changes what it says, because there is only ever
         // one sensible thing to do to a counter you can already see the state of.
         let button = Rect::from_min_max(
-            Pos2::new(rect.right() - PAD - 240.0, rect.top() + 12.0),
-            Pos2::new(rect.right() - PAD - 150.0, rect.top() + 34.0),
+            Pos2::new(rect.right() - PAD - 96.0, rect.top() + 12.0),
+            Pos2::new(rect.right() - PAD, rect.top() + 34.0),
         );
         let response = ui.interact(button, ui.id().with("counter-toggle"), Sense::click());
         let (verb, hot) = if running {
