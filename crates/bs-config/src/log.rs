@@ -21,6 +21,12 @@ pub struct Release {
 /// Newest first, which is the order they are drawn in.
 pub const RELEASES: &[Release] = &[
     Release {
+        version: "0.1.4",
+        date: "2026-07-21",
+        tag: Some("beta"),
+        entries: V0_1_4,
+    },
+    Release {
         version: "0.1.3",
         date: "2026-07-21",
         tag: Some("beta"),
@@ -48,6 +54,24 @@ pub const RELEASES: &[Release] = &[
 
 // Named for the version they belong to rather than for how recent they are, because "current"
 // and "latest" stop being true the moment a release is added above them.
+
+const V0_1_4: &[(&str, &str, bool)] = &[
+    (
+        "Fixed:",
+        "the counter made games hitch about twice a second. Readings arrive twice a second and \
+         each one sets the digits easing, and for as long as they eased the panel redrew on \
+         every single refresh of the display — which on a 144 Hz screen is a burst of twenty \
+         presents, and every present over a game makes Windows rebuild the whole screen.",
+        true,
+    ),
+    (
+        "Motion is now a setting, in frames per second.",
+        "Sixty by default, which is more than a moving number gives the eye. Off stops the \
+         easing altogether and leaves the panel drawing at its resting rate — the cheapest it \
+         can be over a game while still being live.",
+        false,
+    ),
+];
 
 const V0_1_3: &[(&str, &str, bool)] = &[
     (

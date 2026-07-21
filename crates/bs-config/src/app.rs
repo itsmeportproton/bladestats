@@ -28,6 +28,13 @@ const HEADER_H: f32 = 82.0;
 const STATUS_H: f32 = 46.0;
 const FEATURES_W: f32 = 340.0;
 
+/// The redraw rates offered for the panel's motion, and how each is spelled.
+///
+/// Off is first because it is the one somebody arrives here looking for: it is what a player
+/// reaches for when the overlay is costing their game frames, and burying it at the far end of
+/// a row of numbers would hide the answer behind the problem.
+const ANIMATION_RATES: &[(u32, &str)] = &[(0, "Off"), (30, "30"), (60, "60"), (120, "120")];
+
 /// The size the panel is designed at, so the slider can read as a percentage of it rather than
 /// as a pixel count nobody has an intuition for.
 const DEFAULT_FONT_PX: f32 = 16.0;
@@ -709,20 +716,48 @@ impl ConfigApp {
             tint,
         );
 
-        // The one setting here that trades looks for frames, so it says so.
-        //
-        // Every eased frame is a frame the desktop compositor has to rebuild the screen for,
-        // over the game, and the readings ease twice a second as samples land. Off, the digits
-        // step instead of walking and the overlay draws ten times a second.
-        let mut smooth = self.config.placement.animation_hz != 0;
-        if row(ui, &mut smooth, "Smooth motion", "costs a few frames", tint) {
-            self.config.placement.animation_hz = if smooth {
-                bs_core::Placement::default().animation_hz
-            } else {
-                0
-            };
-            changed = true;
-        }
+        // How fast the panel is allowed to redraw while a reading eases — the one setting here
+        // that trades looks for frames, so it is stated in the units a player already thinks
+        // in. Every eased frame makes the desktop compositor rebuild the screen over the game,
+        // and readings ease twice a second as samples land. Off, the digits step instead of
+        // walking and the overlay draws at its resting rate.
+        // The unit belongs in the heading rather than beside the row: laid out to the right of
+        // it, it lands past the edge of this column and is never seen.
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.label(
+                egui::RichText::new("Motion, fps")
+                    .color(theme::TEXT)
+                    .size(13.0),
+            );
+        });
+        ui.add_space(2.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(14.0);
+            for (hz, label) in ANIMATION_RATES {
+                let selected = self.config.placement.animation_hz == *hz;
+                let fill = if selected {
+                    theme::dim(tint, 0.9)
+                } else {
+                    theme::PANEL_HOVER
+                };
+                let text = if selected { theme::GROUND } else { theme::MUTED };
+                let button = egui::Button::new(
+                    egui::RichText::new(*label)
+                        .size(11.0)
+                        .family(FontFamily::Monospace)
+                        .color(text),
+                )
+                .fill(fill)
+                .corner_radius(CornerRadius::same(7));
+
+                if ui.add(button).clicked() && !selected {
+                    self.config.placement.animation_hz = *hz;
+                    changed = true;
+                }
+            }
+        });
 
         // Which way the panel runs. Two choices, so the same segmented row as the corners.
         ui.add_space(4.0);
